@@ -1,0 +1,102 @@
+================================================================================
+  THÔNG TIN CẦN LẤY TỪ VINAPHONE KHI ĐỒNG BỘ DỮ LIỆU SIM
+================================================================================
+
+Tài liệu này mô tả những thông tin hệ thống cần nhận từ phía Vinaphone
+mỗi lần cập nhật dữ liệu tự động, và hệ thống sẽ xử lý chúng như thế nào.
+
+--------------------------------------------------------------------------------
+1. HỆ THỐNG TỰ ĐỘNG LẤY DỮ LIỆU TỪ VINAPHONE BAO LÂU MỘT LẦN?
+--------------------------------------------------------------------------------
+
+  Mặc định: mỗi 10 phút một lần (có thể thay đổi theo yêu cầu).
+
+  Quá trình này diễn ra hoàn toàn tự động, không cần thao tác thủ công.
+
+--------------------------------------------------------------------------------
+2. THÔNG TIN CẦN VINAPHONE CUNG CẤP — MỖI SIM
+--------------------------------------------------------------------------------
+
+  Mỗi lần đồng bộ, với từng SIM, hệ thống cần Vinaphone trả về đủ 4 thông tin:
+
+  ┌─────────────────────────┬──────────────────────────────────────────────────┐
+  │ Thông tin               │ Ý nghĩa                                          │
+  ├─────────────────────────┼──────────────────────────────────────────────────┤
+  │ Số điện thoại SIM       │ Dùng để nhận dạng SIM trong hệ thống.            │
+  │                         │ Đây là thông tin bắt buộc và quan trọng nhất.    │
+  ├─────────────────────────┼──────────────────────────────────────────────────┤
+  │ Mã IMSI                 │ Mã số nhận dạng duy nhất gắn liền với SIM card.  │
+  ├─────────────────────────┼──────────────────────────────────────────────────┤
+  │ Trạng thái SIM          │ Tình trạng hoạt động của SIM trên mạng Vinaphone.│
+  │                         │ Có thể là: Đang hoạt động / Tạm khóa /          │
+  │                         │ Hủy kích hoạt / Chờ kích hoạt.                  │
+  ├─────────────────────────┼──────────────────────────────────────────────────┤
+  │ Dung lượng đã dùng (MB) │ Tổng dung lượng data SIM đã dùng trong tháng    │
+  │                         │ hiện tại, tính theo đơn vị MB.                   │
+  └─────────────────────────┴──────────────────────────────────────────────────┘
+
+--------------------------------------------------------------------------------
+3. SAU KHI NHẬN ĐƯỢC DỮ LIỆU, HỆ THỐNG SẼ LÀM GÌ?
+--------------------------------------------------------------------------------
+
+  3.1. Cập nhật thông tin từng SIM
+  ─────────────────────────────────
+    - Cập nhật dung lượng đã dùng, trạng thái mạng, mã IMSI.
+    - Ghi lại thời điểm vừa cập nhật.
+    - Nếu một SIM trước đó chưa sử dụng (dung lượng = 0) mà nay bắt đầu
+      có dung lượng, hệ thống tự động chuyển trạng thái SIM đó sang
+      "Đã hoạt động" và ghi nhận ngày kích hoạt.
+
+  3.2. Lưu lịch sử dung lượng theo tháng
+  ────────────────────────────────────────
+    - Mỗi SIM sẽ có bản ghi dung lượng riêng cho từng tháng (ví dụ: 2026-04).
+    - Nếu đã có bản ghi tháng này thì cập nhật, chưa có thì tạo mới.
+
+  3.3. Cập nhật dung lượng SIM chủ
+  ──────────────────────────────────
+    - Sau khi cập nhật xong toàn bộ SIM thành viên, hệ thống tự tính lại
+      tổng dung lượng đã dùng cho từng SIM chủ bằng cách cộng dồn
+      dung lượng của tất cả SIM thành viên thuộc SIM chủ đó.
+
+--------------------------------------------------------------------------------
+4. THÔNG TIN HỆ THỐNG TỰ QUẢN LÝ (VINAPHONE KHÔNG CẦN CUNG CẤP)
+--------------------------------------------------------------------------------
+
+  Những thông tin dưới đây do bộ phận quản lý nội bộ tự theo dõi,
+  không phụ thuộc vào Vinaphone:
+
+    Trạng thái nội bộ    Mới / Đã hoạt động / Đã xác nhận
+                         (do admin xác nhận thủ công trên hệ thống)
+
+    Ngày kích hoạt       Ngày SIM bắt đầu có dung lượng sử dụng.
+                         Hệ thống tự ghi nhận.
+
+    Ngày xác nhận        Ngày admin bấm "Xác nhận" cho SIM đó.
+
+    Ghi chú              Ghi chú nội bộ, nhập tay.
+
+    Ngày thêm vào        Ngày SIM được đưa vào danh sách quản lý.
+
+  Những thông tin dưới đây cần được nhập sẵn vào hệ thống trước khi
+  đồng bộ lần đầu (không lấy từ Vinaphone):
+
+    Mã sản phẩm / gói    Gói cước SIM đang dùng.
+    Mã hợp đồng          Mã hợp đồng với khách hàng.
+    SIM chủ liên kết     SIM chủ mà SIM này thuộc về.
+
+--------------------------------------------------------------------------------
+5. CÂU HỎI THƯỜNG GẶP
+--------------------------------------------------------------------------------
+
+  H: Nếu Vinaphone không trả về đủ 4 thông tin thì sao?
+  Đ: Hệ thống sẽ báo lỗi và không cập nhật cho lần đó.
+     Cần liên hệ đội kỹ thuật để kiểm tra lại định dạng dữ liệu từ Vinaphone.
+
+  H: Nếu một số điện thoại trong danh sách Vinaphone không có trong hệ thống?
+  Đ: Hệ thống sẽ bỏ qua số đó. Chỉ cập nhật các SIM đã được thêm vào
+     danh sách quản lý nội bộ.
+
+  H: Dung lượng tính theo đơn vị nào?
+  Đ: Toàn bộ hệ thống thống nhất dùng đơn vị MB. (1 GB = 1.024 MB)
+
+================================================================================

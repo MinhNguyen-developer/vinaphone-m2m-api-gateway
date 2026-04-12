@@ -2,8 +2,7 @@
 /dist
 /node_modules
 
-# Prisma generated client
-/src/generated
+# Prisma generated client (default location is node_modules, already ignored)
 
 # env
 .env
@@ -36,4 +35,4 @@ lerna-debug.log*
 *.tgz
 *.tsbuildinfo
 
-/generated/prisma
+/src/generated/

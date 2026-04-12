@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '../generated/prisma';
+import { Prisma, Sim } from '../generated/prisma/index.js';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateAlertCheckDto } from './dto/update-alert-check.dto';
 
@@ -28,7 +28,7 @@ export class AlertsService {
     });
 
     const results: Array<{
-      sim: { phoneNumber: string; usedMB: number; productCode: string };
+      sim: Sim;
       alert: { id: string; label: string; thresholdMB: number };
       checked: boolean;
     }> = [];
@@ -52,16 +52,8 @@ export class AlertsService {
         });
 
         results.push({
-          sim: {
-            phoneNumber: sim.phoneNumber,
-            usedMB: sim.usedMB,
-            productCode: sim.productCode,
-          },
-          alert: {
-            id: alert.id,
-            label: alert.label,
-            thresholdMB: alert.thresholdMB,
-          },
+          sim,
+          alert,
           checked: check?.checked ?? false,
         });
       }

@@ -6,7 +6,7 @@ import {
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 dayjs.extend(utc);
-import { Prisma, Sim } from '../generated/prisma';
+import { Prisma, Sim } from '../generated/prisma/index.js';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuerySimDto } from './dto/query-sim.dto';
 import { UpdateSimStatusDto, SimStatusAction } from './dto/update-sim-status.dto';
