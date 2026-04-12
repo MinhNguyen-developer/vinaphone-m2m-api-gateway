@@ -1,0 +1,119 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// Models
+// ─────────────────────────────────────────────
+
+model Sim {
+  id            String    @id @default(uuid()) @db.Uuid
+  phoneNumber   String    @unique @db.VarChar(15) @map("phone_number")
+  imsi          String?   @unique @db.VarChar(15)
+  contractCode  String?   @db.VarChar(50)        @map("contract_code")
+  productCode   String    @db.VarChar(50)         @map("product_code")
+  masterSimCode String?   @db.VarChar(20)         @map("master_sim_code")
+  systemStatus  String?   @db.VarChar(20)         @map("system_status")
+  status        String    @default("Mới")         @db.VarChar(30)
+  usedMB        Int       @default(0)              @map("used_mb")
+  firstUsedAt   DateTime? @map("first_used_at")
+  confirmedAt   DateTime? @map("confirmed_at")
+  createdAt     DateTime  @map("created_at")      @db.Date
+  note          String?   @db.Text
+  syncedAt      DateTime? @map("synced_at")
+
+  usageHistory  UsageHistory[]
+  simGroups     SimGroup[]
+  alertChecks   AlertCheck[]
+  alertConfigs  AlertConfig[]
+
+  @@map("sims")
+}
+
+model UsageHistory {
+  id      String @id @default(uuid()) @db.Uuid
+  simId   String @db.Uuid @map("sim_id")
+  month   String @db.Char(7)
+  usedMB  Int    @default(0) @map("used_mb")
+
+  sim Sim @relation(fields: [simId], references: [id], onDelete: Cascade)
+
+  @@unique([simId, month])
+  @@map("usage_history")
+}
+
+model MasterSim {
+  id                String    @id @default(uuid()) @db.Uuid
+  code              String    @unique                          @db.VarChar(20)
+  phoneNumber       String    @unique @map("phone_number")     @db.VarChar(15)
+  packageName       String    @map("package_name")            @db.VarChar(100)
+  packageCapacityMB Int       @map("package_capacity_mb")
+  usedMB            Int       @default(0) @map("used_mb")
+  description       String?   @db.Text
+  syncedAt          DateTime? @map("synced_at")
+
+  @@map("master_sims")
+}
+
+model Group {
+  id          String     @id @default(uuid()) @db.Uuid
+  name        String     @db.VarChar(100)
+  description String?    @db.Text
+  createdAt   DateTime   @default(dbgenerated("CURRENT_DATE")) @map("created_at") @db.Date
+
+  simGroups    SimGroup[]
+  alertConfigs AlertConfig[]
+
+  @@map("groups")
+}
+
+model SimGroup {
+  simId   String @db.Uuid @map("sim_id")
+  groupId String @db.Uuid @map("group_id")
+
+  sim   Sim   @relation(fields: [simId],   references: [id], onDelete: Cascade)
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([simId, groupId])
+  @@map("sim_groups")
+}
+
+model AlertConfig {
+  id           String   @id @default(uuid()) @db.Uuid
+  label        String   @db.VarChar(200)
+  thresholdMB  Int      @map("threshold_mb")
+  simId        String?  @db.Uuid @map("sim_id")
+  groupId      String?  @db.Uuid @map("group_id")
+  productCode  String?  @db.VarChar(50) @map("product_code")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  sim    Sim?   @relation(fields: [simId],   references: [id], onDelete: Cascade)
+  group  Group? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  alertChecks AlertCheck[]
+
+  @@map("alert_configs")
+}
+
+model AlertCheck {
+  id        String    @id @default(uuid()) @db.Uuid
+  simId     String    @db.Uuid @map("sim_id")
+  alertId   String    @db.Uuid @map("alert_id")
+  checked   Boolean   @default(false)
+  checkedAt DateTime? @map("checked_at")
+  checkedBy String?   @db.VarChar(100) @map("checked_by")
+
+  sim   Sim         @relation(fields: [simId],   references: [id], onDelete: Cascade)
+  alert AlertConfig @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@unique([simId, alertId])
+  @@map("alert_checks")
+}
