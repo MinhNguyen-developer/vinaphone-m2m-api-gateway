@@ -9,11 +9,7 @@ import { SyncService } from './sync.service';
     HttpModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
-        timeout: config.get<number>('vinaphone.timeoutMs') ?? 10000,
-        baseURL: config.get<string>('vinaphone.baseUrl'),
-        headers: {
-          'x-api-key': config.get<string>('vinaphone.apiKey') ?? '',
-        },
+        timeout: config.get<number>('vinaphone.timeoutMs') ?? 1000,
       }),
       inject: [ConfigService],
     }),

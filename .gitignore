@@ -36,3 +36,5 @@ lerna-debug.log*
 *.tsbuildinfo
 
 /src/generated/
+
+*.html

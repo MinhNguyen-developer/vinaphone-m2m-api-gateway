@@ -16,33 +16,53 @@ datasource db {
 
 model Sim {
   id            String    @id @default(uuid()) @db.Uuid
-  phoneNumber   String    @unique @db.VarChar(15) @map("phone_number")
+  phoneNumber   String    @unique @map("phone_number") @db.VarChar(15)
   imsi          String?   @unique @db.VarChar(15)
-  contractCode  String?   @db.VarChar(50)        @map("contract_code")
-  productCode   String    @db.VarChar(50)         @map("product_code")
-  masterSimCode String?   @db.VarChar(20)         @map("master_sim_code")
-  systemStatus  String?   @db.VarChar(20)         @map("system_status")
-  status        String    @default("Mới")         @db.VarChar(30)
-  usedMB        Int       @default(0)              @map("used_mb")
+  contractCode  String?   @map("contract_code") @db.VarChar(50)
+  productCode   String    @map("product_code") @db.VarChar(50)
+  masterSimCode String?   @map("master_sim_code") @db.VarChar(20)
+  systemStatus  String?   @map("system_status") @db.VarChar(20)
+  status        String    @default("Mới") @db.VarChar(30)
+  usedMB        Int       @default(0) @map("used_mb")
   firstUsedAt   DateTime? @map("first_used_at")
   confirmedAt   DateTime? @map("confirmed_at")
-  createdAt     DateTime  @map("created_at")      @db.Date
+  createdAt     DateTime  @map("created_at") @db.Date
   note          String?   @db.Text
   syncedAt      DateTime? @map("synced_at")
 
-  usageHistory  UsageHistory[]
-  simGroups     SimGroup[]
-  alertChecks   AlertCheck[]
-  alertConfigs  AlertConfig[]
+  simType Int @default(0) @map("sim_type") // 0 = M2M, 1 = e-sim
+
+  // ── SOG (nhóm gói cước từ Vinaphone) ─────────────────────────────────────
+  sogGroupId   String?  @map("sog_group_id") @db.VarChar(50)
+  sogGroupName String?  @map("sog_group_name") @db.VarChar(255)
+  sogMaGoi     String?  @map("sog_ma_goi") @db.VarChar(100)
+  /**
+   * true = chủ nhóm (msisdn_chu_nhom IS NULL); false = thành viên; null = không có sog
+   */
+  sogIsOwner   Boolean? @map("sog_is_owner")
+
+  customerName String? @map("customer_name") @db.VarChar(255)
+  customerCode String? @map("customer_code") @db.VarChar(100)
+  contractInfo String? @map("contract_info") @db.Text
+
+  provinceCode String? @map("province_code") @db.VarChar(20)
+
+  ratingPlanId   Int?    @map("rating_plan_id") @db.Integer
+  ratingPlanName String? @map("rating_plan_name") @db.VarChar(255)
+
+  usageHistory UsageHistory[]
+  simGroups    SimGroup[]
+  alertChecks  AlertCheck[]
+  alertConfigs AlertConfig[]
 
   @@map("sims")
 }
 
 model UsageHistory {
-  id      String @id @default(uuid()) @db.Uuid
-  simId   String @db.Uuid @map("sim_id")
-  month   String @db.Char(7)
-  usedMB  Int    @default(0) @map("used_mb")
+  id     String @id @default(uuid()) @db.Uuid
+  simId  String @map("sim_id") @db.Uuid
+  month  String @db.Char(7)
+  usedMB Int    @default(0) @map("used_mb")
 
   sim Sim @relation(fields: [simId], references: [id], onDelete: Cascade)
 
@@ -52,9 +72,9 @@ model UsageHistory {
 
 model MasterSim {
   id                String    @id @default(uuid()) @db.Uuid
-  code              String    @unique                          @db.VarChar(20)
-  phoneNumber       String    @unique @map("phone_number")     @db.VarChar(15)
-  packageName       String    @map("package_name")            @db.VarChar(100)
+  code              String    @unique @db.VarChar(20)
+  phoneNumber       String    @unique @map("phone_number") @db.VarChar(15)
+  packageName       String    @map("package_name") @db.VarChar(100)
   packageCapacityMB Int       @map("package_capacity_mb")
   usedMB            Int       @default(0) @map("used_mb")
   description       String?   @db.Text
@@ -64,10 +84,10 @@ model MasterSim {
 }
 
 model Group {
-  id          String     @id @default(uuid()) @db.Uuid
-  name        String     @db.VarChar(100)
-  description String?    @db.Text
-  createdAt   DateTime   @default(dbgenerated("CURRENT_DATE")) @map("created_at") @db.Date
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(100)
+  description String?  @db.Text
+  createdAt   DateTime @default(dbgenerated("CURRENT_DATE")) @map("created_at") @db.Date
 
   simGroups    SimGroup[]
   alertConfigs AlertConfig[]
@@ -76,10 +96,10 @@ model Group {
 }
 
 model SimGroup {
-  simId   String @db.Uuid @map("sim_id")
-  groupId String @db.Uuid @map("group_id")
+  simId   String @map("sim_id") @db.Uuid
+  groupId String @map("group_id") @db.Uuid
 
-  sim   Sim   @relation(fields: [simId],   references: [id], onDelete: Cascade)
+  sim   Sim   @relation(fields: [simId], references: [id], onDelete: Cascade)
   group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@id([simId, groupId])
@@ -87,17 +107,17 @@ model SimGroup {
 }
 
 model AlertConfig {
-  id           String   @id @default(uuid()) @db.Uuid
-  label        String   @db.VarChar(200)
-  thresholdMB  Int      @map("threshold_mb")
-  simId        String?  @db.Uuid @map("sim_id")
-  groupId      String?  @db.Uuid @map("group_id")
-  productCode  String?  @db.VarChar(50) @map("product_code")
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid()) @db.Uuid
+  label       String   @db.VarChar(200)
+  thresholdMB Int      @map("threshold_mb")
+  simId       String?  @map("sim_id") @db.Uuid
+  groupId     String?  @map("group_id") @db.Uuid
+  productCode String?  @map("product_code") @db.VarChar(50)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  sim    Sim?   @relation(fields: [simId],   references: [id], onDelete: Cascade)
-  group  Group? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sim         Sim?         @relation(fields: [simId], references: [id], onDelete: Cascade)
+  group       Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
   alertChecks AlertCheck[]
 
   @@map("alert_configs")
@@ -105,15 +125,38 @@ model AlertConfig {
 
 model AlertCheck {
   id        String    @id @default(uuid()) @db.Uuid
-  simId     String    @db.Uuid @map("sim_id")
-  alertId   String    @db.Uuid @map("alert_id")
+  simId     String    @map("sim_id") @db.Uuid
+  alertId   String    @map("alert_id") @db.Uuid
   checked   Boolean   @default(false)
   checkedAt DateTime? @map("checked_at")
-  checkedBy String?   @db.VarChar(100) @map("checked_by")
+  checkedBy String?   @map("checked_by") @db.VarChar(100)
 
-  sim   Sim         @relation(fields: [simId],   references: [id], onDelete: Cascade)
+  sim   Sim         @relation(fields: [simId], references: [id], onDelete: Cascade)
   alert AlertConfig @relation(fields: [alertId], references: [id], onDelete: Cascade)
 
   @@unique([simId, alertId])
   @@map("alert_checks")
+}
+
+// Thành viên trong nhóm gói cước của Vinaphone (cached từ API memberOfGr)
+model SimGroupMember {
+  id             String    @id @default(uuid()) @db.Uuid
+  groupId        String    @map("group_id") @db.VarChar(50)
+  msisdn         String    @db.VarChar(15)
+  ratingPlanName String?   @map("rating_plan_name") @db.VarChar(255)
+  status         Int?
+  syncedAt       DateTime? @map("synced_at")
+
+  @@unique([groupId, msisdn])
+  @@map("sim_group_members")
+}
+
+model RatingPlan {
+  id           String    @id @default(uuid()) @db.Uuid
+  ratingPlanId Int       @unique @map("rating_plan_id") @db.Integer
+  code         String    @unique @db.VarChar(50)
+  name         String    @db.VarChar(255)
+  syncedAt     DateTime? @map("synced_at")
+
+  @@map("rating_plans")
 }
