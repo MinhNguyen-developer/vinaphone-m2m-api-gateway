@@ -9,8 +9,12 @@ dayjs.extend(utc);
 import { Prisma, Sim } from '../generated/prisma/index.js';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuerySimDto } from './dto/query-sim.dto';
-import { UpdateSimStatusDto, SimStatusAction } from './dto/update-sim-status.dto';
+import {
+  UpdateSimStatusDto,
+  SimStatusAction,
+} from './dto/update-sim-status.dto';
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
+import { QueryGroupMembersDto } from './dto/query-group-members.dto.js';
 
 @Injectable()
 export class SimsService {
@@ -25,18 +29,22 @@ export class SimsService {
       systemStatus,
       status,
       search,
+      contractCode,
+      imsi,
+      ratingPlanId,
     } = query;
 
     const where: Prisma.SimWhereInput = {
       ...(productCode && { productCode }),
       ...(masterSimCode && { masterSimCode }),
+      ...(ratingPlanId && { ratingPlanId }),
       ...(systemStatus && { systemStatus }),
       ...(status && { status }),
       ...(search && {
         OR: [
           { phoneNumber: { contains: search, mode: 'insensitive' } },
-          { imsi: { contains: search, mode: 'insensitive' } },
-          { contractCode: { contains: search, mode: 'insensitive' } },
+          { imsi: { contains: imsi, mode: 'insensitive' } },
+          { contractCode: { contains: contractCode, mode: 'insensitive' } },
         ],
       }),
     };
@@ -90,6 +98,27 @@ export class SimsService {
     });
   }
 
+  async getGroupMembers(groupId: string, query: QueryGroupMembersDto) {
+    const { page = 1, pageSize = 50, msisdn } = query;
+
+    const where: Prisma.SimGroupMemberWhereInput = {
+      groupId,
+      ...(msisdn && { msisdn: { contains: msisdn, mode: 'insensitive' } }),
+    };
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.simGroupMember.findMany({
+        where,
+        orderBy: { msisdn: 'asc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.simGroupMember.count({ where }),
+    ]);
+
+    return { data, total, page, pageSize };
+  }
+
   formatSim(sim: Sim) {
     return {
       id: sim.id,
@@ -109,6 +138,15 @@ export class SimsService {
         : null,
       createdAt: sim.createdAt,
       note: sim.note ?? '',
+      sogGroupId: sim.sogGroupId,
+      sogGroupName: sim.sogGroupName,
+      sogMaGoi: sim.sogMaGoi,
+      sogIsOwner: sim.sogIsOwner,
+      simType: sim.simType,
+      contractInfo: sim.contractInfo,
+      customerName: sim.customerName,
+      customerCode: sim.customerCode,
+      provinceCode: sim.provinceCode,
     };
   }
 }

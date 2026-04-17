@@ -38,8 +38,24 @@ export class QuerySimDto {
   @IsString()
   status?: string;
 
-  @ApiPropertyOptional({ description: 'Tìm theo SĐT, IMSI, hoặc mã hợp đồng' })
+  @ApiPropertyOptional({ description: 'Tìm theo SĐT' })
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({ description: 'Tìm theo mã hợp đồng' })
+  @IsOptional()
+  @IsString()
+  contractCode?: string;
+
+  @ApiPropertyOptional({ description: 'Tìm theo IMSI' })
+  @IsOptional()
+  @IsString()
+  imsi?: string;
+
+  @ApiPropertyOptional({ description: 'Tìm theo gói cước' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  ratingPlanId?: number;
 }

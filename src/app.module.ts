@@ -12,6 +12,7 @@ import { UsageHistoryModule } from './usage-history/usage-history.module';
 import { GroupsModule } from './groups/groups.module';
 import { AlertsModule } from './alerts/alerts.module';
 import { SyncModule } from './sync/sync.module';
+import { RatingPlanModule } from './rating-plan/rating-plan.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { SyncModule } from './sync/sync.module';
     GroupsModule,
     AlertsModule,
     SyncModule,
+    RatingPlanModule,
   ],
 })
 export class AppModule {}
