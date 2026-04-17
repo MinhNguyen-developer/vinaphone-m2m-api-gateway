@@ -27,6 +27,8 @@ export default () => ({
   },
 
   syncCron: process.env.SYNC_CRON || '*/10 * * * *',
+  /** Secret sent by Vercel Cron in the Authorization: Bearer header */
+  cronSecret: process.env.CRON_SECRET || '',
 
   redis: {
     host: process.env.REDIS_HOST || 'localhost',
