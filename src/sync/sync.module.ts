@@ -3,6 +3,7 @@ import { HttpModule } from '@nestjs/axios';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { SyncService } from './sync.service';
+import { SyncController } from './sync.controller';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { SyncService } from './sync.service';
       inject: [ConfigService],
     }),
   ],
+  controllers: [SyncController],
   providers: [SyncService],
   exports: [SyncService],
 })
