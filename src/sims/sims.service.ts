@@ -9,6 +9,7 @@ dayjs.extend(utc);
 import { Prisma, Sim } from '../generated/prisma/index.js';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuerySimDto } from './dto/query-sim.dto';
+import { parseSortParam } from './dto/query-sim.dto';
 import {
   UpdateSimStatusDto,
   SimStatusAction,
@@ -32,6 +33,9 @@ export class SimsService {
       contractCode,
       imsi,
       ratingPlanId,
+      groupName,
+      simType,
+      sort,
     } = query;
 
     const where: Prisma.SimWhereInput = {
@@ -39,7 +43,9 @@ export class SimsService {
       ...(masterSimCode && { masterSimCode }),
       ...(ratingPlanId && { ratingPlanId }),
       ...(systemStatus && { systemStatus }),
+      ...(groupName && { groupName }),
       ...(status && { status }),
+      ...(simType !== undefined && { simType }),
       ...(search && {
         OR: [
           { phoneNumber: { contains: search, mode: 'insensitive' } },
@@ -49,9 +55,17 @@ export class SimsService {
       }),
     };
 
+    const orderBy: Prisma.SimOrderByWithRelationInput[] = parseSortParam(
+      sort,
+    ).map(
+      ({ field, order }) =>
+        ({ [field]: order }) as Prisma.SimOrderByWithRelationInput,
+    );
+
     const [data, total] = await this.prisma.$transaction([
       this.prisma.sim.findMany({
         where,
+        orderBy: orderBy.length ? orderBy : [{ phoneNumber: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -147,6 +161,7 @@ export class SimsService {
       customerName: sim.customerName,
       customerCode: sim.customerCode,
       provinceCode: sim.provinceCode,
+      groupName: sim.groupName,
     };
   }
 }

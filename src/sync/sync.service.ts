@@ -13,6 +13,8 @@ import type {
   MemberOfGrResponse,
   VinaphoneApiBaseResponse,
   RatingPlanItem,
+  GroupSimItem,
+  UsedDataItem,
 } from './vinaphone-api.types';
 
 /** Parse the `sog` JSON string, returning the first entry or null */
@@ -74,15 +76,25 @@ export class SyncService implements OnModuleInit {
     const cronExpression =
       this.configService.get<string>('syncCron') ?? CronExpression.EVERY_MINUTE;
     const syncSimJob = new CronJob(cronExpression, () => void this.syncSims());
-    this.schedulerRegistry.addCronJob('syncSims', syncSimJob);
+    const syncGroupSimsJob = new CronJob(
+      cronExpression,
+      () => void this.syncGroupSims(),
+    );
     const syncRatingPlansJob = new CronJob(
       cronExpression,
       () => void this.syncRatingPlans(),
     );
+
+    this.schedulerRegistry.addCronJob('syncSims', syncSimJob);
     this.schedulerRegistry.addCronJob('syncRatingPlans', syncRatingPlansJob);
+    this.schedulerRegistry.addCronJob('syncGroupSims', syncGroupSimsJob);
+
+    this.logger.log(`Sync cron scheduled: ${cronExpression}`);
+
+    // Start immediately on app launch
     syncSimJob.start();
     syncRatingPlansJob.start();
-    this.logger.log(`Sync cron scheduled: ${cronExpression}`);
+    syncGroupSimsJob.start();
   }
 
   // ─── Token management ──────────────────────────────────────────────────────
@@ -122,6 +134,38 @@ export class SyncService implements OnModuleInit {
 
   private authHeaders(token: string) {
     return { Authorization: `Bearer ${token}` };
+  }
+
+  /**
+   * Retry an async operation up to `maxAttempts` times with exponential backoff.
+   * Only retries on network errors or HTTP 5xx responses.
+   */
+  private async withRetry<T>(
+    label: string,
+    fn: () => Promise<T>,
+    maxAttempts = 3,
+    baseDelayMs = 2_000,
+  ): Promise<T> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await fn();
+      } catch (err: any) {
+        const status = err?.response?.status as number | undefined;
+        const isRetryable =
+          !status || // network error (no response)
+          status === 429 || // rate limited
+          (status >= 500 && status <= 599); // server error
+
+        if (!isRetryable || attempt === maxAttempts) throw err;
+
+        const delay = baseDelayMs * 2 ** (attempt - 1); // 2s, 4s, 8s …
+        this.logger.warn(
+          `${label} — attempt ${attempt}/${maxAttempts} failed (status ${status ?? 'network'}), retrying in ${delay}ms`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+    throw new Error(`${label} — exhausted ${maxAttempts} attempts`);
   }
 
   // ─── Sync entry point ──────────────────────────────────────────────────────
@@ -186,6 +230,43 @@ export class SyncService implements OnModuleInit {
       }> = [];
       const usageUpserts: Array<{ phoneNumber: string; usedMB: number }> = [];
 
+      // ── Bulk-fetch usage data (one call per 200 SIMs instead of 1 per SIM) ──
+      const USAGE_BATCH_SIZE = 200;
+      const usedDataMap = new Map<number, number>(); // msisdn → usedMB
+      for (let i = 0; i < allVinaSims.length; i += USAGE_BATCH_SIZE) {
+        const chunk = allVinaSims.slice(i, i + USAGE_BATCH_SIZE);
+        const msisdns = chunk.map((s) => s.msisdn);
+        const batchNum = Math.floor(i / USAGE_BATCH_SIZE) + 1;
+        try {
+          const { data: items } = await this.withRetry(
+            `get-data-used batch ${batchNum}`,
+            () =>
+              firstValueFrom(
+                this.httpService.post<UsedDataItem[]>(
+                  `${baseUrl}/sim-mgmt/get-data-used`,
+                  msisdns,
+                  { headers, timeout: dataTimeout },
+                ),
+              ),
+          );
+          for (const item of items) {
+            const mb = Math.round(Number(item.usedData ?? 0) / (1024 * 1024));
+            usedDataMap.set(Number(item.msisdn), mb);
+          }
+          this.logger.debug(
+            `get-data-used batch ${batchNum}: fetched ${items.length} records`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `get-data-used batch ${batchNum} failed after retries — usage data will be 0 for this batch`,
+            err,
+          );
+        }
+      }
+      this.logger.log(
+        `Fetched usage data for ${usedDataMap.size} SIMs in ${Math.ceil(allVinaSims.length / USAGE_BATCH_SIZE)} batch(es)`,
+      );
+
       for (const vSim of allVinaSims) {
         const {
           customerName,
@@ -195,12 +276,14 @@ export class SyncService implements OnModuleInit {
           provinceCode,
           ratingPlanId,
           ratingPlanName,
+          groupName,
         } = vSim;
-        const msisdnStr = normalizeMsisdn(vSim.msisdn);
+        const msisdnStr = String(vSim.msisdn);
         const existing = simByPhone.get(msisdnStr);
 
-        // usagedData is in bytes → convert to MB
-        const newUsedMB = Math.round((vSim.usagedData ?? 0) / (1024 * 1024));
+        const newUsedMB = usedDataMap.get(Number(vSim.msisdn)) ?? 0;
+
+        // usagedData is in bytes → already converted to MB in bulk fetch above
         const vinaphoneStatus = mapSimStatus(vSim.status);
 
         // Parse SOG (nhóm gói cước)
@@ -227,6 +310,7 @@ export class SyncService implements OnModuleInit {
           provinceCode,
           ratingPlanId,
           ratingPlanName,
+          groupName, // newly added field from quickSearch response (not in original sims-mgmt API)
         };
 
         // Auto-transition: Mới → Đã hoạt động when usedMB first > 0
@@ -370,6 +454,46 @@ export class SyncService implements OnModuleInit {
     }
   }
 
+  // --- Sync group sims ─────────────────────────────────────────────────────
+
+  async syncGroupSims() {
+    this.logger.log('Starting group sim sync from Vinaphone API...');
+    try {
+      const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
+      const timeout =
+        this.configService.get<number>('vinaphone.timeoutMs') ?? 10_000;
+      const token = await this.getToken();
+      const headers = this.authHeaders(token);
+
+      const allGroupSims = await this.fetchAllGroupSims(
+        baseUrl,
+        headers,
+        timeout,
+      );
+
+      // Upsert group sims
+      for (const gs of allGroupSims) {
+        await this.prisma.groupSim.upsert({
+          where: {
+            groupId: gs.id,
+          },
+          update: { name: gs.name, groupKey: gs.groupKey },
+          create: {
+            groupId: gs.id,
+            name: gs.name,
+            groupKey: gs.groupKey,
+          },
+        });
+      }
+
+      this.logger.log(
+        `Group sim sync completed: ${allGroupSims.length} group sims processed.`,
+      );
+    } catch (err) {
+      this.logger.error('Group sim sync failed', (err as Error).stack);
+    }
+  }
+
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
   /**
@@ -385,21 +509,25 @@ export class SyncService implements OnModuleInit {
     const allSims: QuickSearchSimItem[] = [];
 
     while (true) {
-      const { data } = await firstValueFrom(
-        this.httpService.get<VinaphoneApiBaseResponse<QuickSearchSimItem>>(
-          `${baseUrl}/sim-mgmt/quickSearch`,
-          {
-            headers,
-            timeout,
-            params: {
-              page,
-              size: pageSize,
-              sort: 'msisdn,asc',
-              loggable: true,
-              keySearch: '',
-            },
-          },
-        ),
+      const { data } = await this.withRetry(
+        `quickSearch page ${page}`,
+        () =>
+          firstValueFrom(
+            this.httpService.get<VinaphoneApiBaseResponse<QuickSearchSimItem>>(
+              `${baseUrl}/sim-mgmt/quickSearch`,
+              {
+                headers,
+                timeout,
+                params: {
+                  page,
+                  size: pageSize,
+                  sort: 'msisdn,asc',
+                  loggable: true,
+                  keySearch: '',
+                },
+              },
+            ),
+          ),
       );
 
       allSims.push(...data.content);
@@ -426,20 +554,24 @@ export class SyncService implements OnModuleInit {
     const allRatingPlans: RatingPlanItem[] = [];
 
     while (true) {
-      const { data } = await firstValueFrom(
-        this.httpService.get<VinaphoneApiBaseResponse<RatingPlanItem>>(
-          `${baseUrl}/sim-mgmt/dropdown`,
-          {
-            headers,
-            timeout,
-            params: {
-              page,
-              size: pageSize,
-              type: 'ratingPlan',
-              sort: 'name,asc',
-            },
-          },
-        ),
+      const { data } = await this.withRetry(
+        `ratingPlan dropdown page ${page}`,
+        () =>
+          firstValueFrom(
+            this.httpService.get<VinaphoneApiBaseResponse<RatingPlanItem>>(
+              `${baseUrl}/sim-mgmt/dropdown`,
+              {
+                headers,
+                timeout,
+                params: {
+                  page,
+                  size: pageSize,
+                  type: 'ratingPlan',
+                  sort: 'name,asc',
+                },
+              },
+            ),
+          ),
       );
 
       allRatingPlans.push(...data.content);
@@ -452,6 +584,48 @@ export class SyncService implements OnModuleInit {
 
     this.logger.log(`Fetched ${allRatingPlans.length} rating plans`);
     return allRatingPlans;
+  }
+
+  private async fetchAllGroupSims(
+    baseUrl: string,
+    headers: Record<string, string>,
+    timeout: number,
+  ) {
+    const pageSize = 20;
+    let page = 0;
+    const allGroupSims: GroupSimItem[] = [];
+
+    while (true) {
+      const { data } = await this.withRetry(
+        `groupSim dropdown page ${page}`,
+        () =>
+          firstValueFrom(
+            this.httpService.get<VinaphoneApiBaseResponse<GroupSimItem>>(
+              `${baseUrl}/sim-mgmt/dropdown`,
+              {
+                headers,
+                timeout,
+                params: {
+                  page,
+                  size: pageSize,
+                  type: 'groupSim',
+                  sort: 'name,asc',
+                },
+              },
+            ),
+          ),
+      );
+
+      allGroupSims.push(...data.content);
+
+      if (data.last || allGroupSims.length >= pageSize * (page + 1)) {
+        break;
+      }
+      page++;
+    }
+
+    this.logger.log(`Fetched ${allGroupSims.length} group sims`);
+    return allGroupSims;
   }
 
   /**
@@ -468,15 +642,19 @@ export class SyncService implements OnModuleInit {
     let page = 0;
 
     while (true) {
-      const { data } = await firstValueFrom(
-        this.httpService.get<MemberOfGrResponse>(
-          `${baseUrl}/sim-mgmt/memberOfGr`,
-          {
-            headers,
-            timeout,
-            params: { page, size: pageSize, id: groupId, ratingPlanName },
-          },
-        ),
+      const { data } = await this.withRetry(
+        `memberOfGr group ${groupId} page ${page}`,
+        () =>
+          firstValueFrom(
+            this.httpService.get<MemberOfGrResponse>(
+              `${baseUrl}/sim-mgmt/memberOfGr`,
+              {
+                headers,
+                timeout,
+                params: { page, size: pageSize, id: groupId, ratingPlanName },
+              },
+            ),
+          ),
       );
 
       const now = new Date();
