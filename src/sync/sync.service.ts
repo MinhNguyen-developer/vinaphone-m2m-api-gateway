@@ -509,25 +509,23 @@ export class SyncService implements OnModuleInit {
     const allSims: QuickSearchSimItem[] = [];
 
     while (true) {
-      const { data } = await this.withRetry(
-        `quickSearch page ${page}`,
-        () =>
-          firstValueFrom(
-            this.httpService.get<VinaphoneApiBaseResponse<QuickSearchSimItem>>(
-              `${baseUrl}/sim-mgmt/quickSearch`,
-              {
-                headers,
-                timeout,
-                params: {
-                  page,
-                  size: pageSize,
-                  sort: 'msisdn,asc',
-                  loggable: true,
-                  keySearch: '',
-                },
+      const { data } = await this.withRetry(`quickSearch page ${page}`, () =>
+        firstValueFrom(
+          this.httpService.get<VinaphoneApiBaseResponse<QuickSearchSimItem>>(
+            `${baseUrl}/sim-mgmt/quickSearch`,
+            {
+              headers,
+              timeout,
+              params: {
+                page,
+                size: pageSize,
+                sort: 'msisdn,asc',
+                loggable: true,
+                keySearch: '',
               },
-            ),
+            },
           ),
+        ),
       );
 
       allSims.push(...data.content);

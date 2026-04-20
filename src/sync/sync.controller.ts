@@ -6,7 +6,12 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiBearerAuth, ApiExcludeEndpoint } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiTags,
+  ApiBearerAuth,
+  ApiExcludeEndpoint,
+} from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { Public } from '../auth/public.decorator';
 import { SyncService } from './sync.service';
@@ -46,7 +51,11 @@ export class SyncController {
   @HttpCode(HttpStatus.OK)
   triggerSims() {
     void this.syncService.syncSims();
-    return { triggered: true, job: 'syncSims', timestamp: new Date().toISOString() };
+    return {
+      triggered: true,
+      job: 'syncSims',
+      timestamp: new Date().toISOString(),
+    };
   }
 
   /** Manually trigger rating plan sync (fire-and-forget). */
@@ -55,7 +64,11 @@ export class SyncController {
   @HttpCode(HttpStatus.OK)
   triggerRatingPlans() {
     void this.syncService.syncRatingPlans();
-    return { triggered: true, job: 'syncRatingPlans', timestamp: new Date().toISOString() };
+    return {
+      triggered: true,
+      job: 'syncRatingPlans',
+      timestamp: new Date().toISOString(),
+    };
   }
 
   /** Manually trigger group SIM sync (fire-and-forget). */
@@ -64,6 +77,10 @@ export class SyncController {
   @HttpCode(HttpStatus.OK)
   triggerGroupSims() {
     void this.syncService.syncGroupSims();
-    return { triggered: true, job: 'syncGroupSims', timestamp: new Date().toISOString() };
+    return {
+      triggered: true,
+      job: 'syncGroupSims',
+      timestamp: new Date().toISOString(),
+    };
   }
 }
