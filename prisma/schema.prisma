@@ -50,6 +50,8 @@ model Sim {
   ratingPlanId   Int?    @map("rating_plan_id") @db.Integer
   ratingPlanName String? @map("rating_plan_name") @db.VarChar(255)
 
+  groupName String? @map("group_name") @db.VarChar(255)
+
   usageHistory UsageHistory[]
   simGroups    SimGroup[]
   alertChecks  AlertCheck[]
@@ -93,6 +95,13 @@ model Group {
   alertConfigs AlertConfig[]
 
   @@map("groups")
+}
+
+model GroupSim {
+  id       String @id @default(uuid()) @db.Uuid
+  groupId  Int    @unique @map("group_id") @db.Integer
+  name     String @map("name") @db.VarChar(100)
+  groupKey String @unique @map("group_key") @db.VarChar(50)
 }
 
 model SimGroup {

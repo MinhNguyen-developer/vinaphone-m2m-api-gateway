@@ -13,6 +13,7 @@ import { GroupsModule } from './groups/groups.module';
 import { AlertsModule } from './alerts/alerts.module';
 import { SyncModule } from './sync/sync.module';
 import { RatingPlanModule } from './rating-plan/rating-plan.module';
+import { SimGroupModule } from './sim-group/sim-group.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { RatingPlanModule } from './rating-plan/rating-plan.module';
     AlertsModule,
     SyncModule,
     RatingPlanModule,
+    SimGroupModule,
   ],
 })
 export class AppModule {}

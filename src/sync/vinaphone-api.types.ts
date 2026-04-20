@@ -97,6 +97,17 @@ export interface RatingPlanItem {
   name: string;
 }
 
+export interface GroupSimItem {
+  id: number;
+  name: string;
+  groupKey: string;
+}
+
+export interface UsedDataItem {
+  msisdn: number;
+  usedData: string; // e.g. "65008912198" (in bytes)
+}
+
 export interface QuickSearchPageable {
   pageNumber: number;
   pageSize: number;
