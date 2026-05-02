@@ -1,14 +1,34 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateGroupDto } from './dto/create-group.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
+import { PaginatedResult } from 'src/types/common';
+import { Group, Prisma } from 'src/generated/prisma';
+import { QueryGroupDto } from './dto/query-group.dto';
 
 @Injectable()
 export class GroupsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
-    const groups = await this.prisma.group.findMany({
-      include: { _count: { select: { simGroups: true } } },
-    });
+  async findAll(query: QueryGroupDto): Promise<PaginatedResult<Group>> {
+    const { page = 1, pageSize = 50, search } = query;
+
+    const where: Prisma.GroupWhereInput = {
+      ...(search && { name: { contains: search, mode: 'insensitive' } }),
+    };
+
+    const [groups, total] = await this.prisma.$transaction([
+      this.prisma.group.findMany({
+        where,
+        include: {
+          _count: { select: { simGroups: true } },
+          simGroups: { include: { sim: { select: { usedMB: true } } } },
+        },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.group.count({ where }),
+    ]);
 
     return {
       data: groups.map((g) => ({
@@ -16,8 +36,96 @@ export class GroupsService {
         name: g.name,
         description: g.description ?? '',
         simCount: g._count.simGroups,
+        totalUsedMB: g.simGroups.reduce((acc, sg) => acc + sg.sim.usedMB, 0),
         createdAt: g.createdAt,
       })),
+      total,
+      page,
+      pageSize,
     };
+  }
+
+  async getAllGroups() {
+    const groups = await this.prisma.group.findMany();
+
+    return {
+      data: groups,
+    };
+  }
+
+  async getSimIds(id: string) {
+    await this.findOneOrThrow(id);
+    const simGroups = await this.prisma.simGroup.findMany({
+      where: { groupId: id },
+      select: { simId: true },
+    });
+    return { data: simGroups.map((sg) => sg.simId) };
+  }
+
+  async create(dto: CreateGroupDto) {
+    const group = await this.prisma.group.create({
+      data: {
+        name: dto.name,
+        description: dto.description,
+        simGroups: dto.simIds?.length
+          ? { create: dto.simIds.map((simId) => ({ simId })) }
+          : undefined,
+      },
+      include: { _count: { select: { simGroups: true } } },
+    });
+    return {
+      id: group.id,
+      name: group.name,
+      description: group.description ?? '',
+      simCount: group._count.simGroups,
+      createdAt: group.createdAt,
+    };
+  }
+
+  async update(id: string, dto: UpdateGroupDto) {
+    await this.findOneOrThrow(id);
+
+    // Update group fields
+    const group = await this.prisma.group.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.description !== undefined && { description: dto.description }),
+      },
+    });
+
+    // If simIds provided, replace all sim memberships
+    if (dto.simIds !== undefined) {
+      await this.prisma.simGroup.deleteMany({ where: { groupId: id } });
+      if (dto.simIds.length > 0) {
+        await this.prisma.simGroup.createMany({
+          data: dto.simIds.map((simId) => ({ simId, groupId: id })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    const updated = await this.prisma.group.findUnique({
+      where: { id },
+      include: { _count: { select: { simGroups: true } } },
+    });
+    return {
+      id: updated!.id,
+      name: updated!.name,
+      description: updated!.description ?? '',
+      simCount: updated!._count.simGroups,
+      createdAt: updated!.createdAt,
+    };
+  }
+
+  async remove(id: string) {
+    await this.findOneOrThrow(id);
+    await this.prisma.group.delete({ where: { id } });
+  }
+
+  private async findOneOrThrow(id: string) {
+    const group = await this.prisma.group.findUnique({ where: { id } });
+    if (!group) throw new NotFoundException(`Nhóm ${id} không tồn tại`);
+    return group;
   }
 }

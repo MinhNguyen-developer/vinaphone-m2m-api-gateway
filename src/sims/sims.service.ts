@@ -6,16 +6,19 @@ import {
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 dayjs.extend(utc);
-import { Prisma, Sim } from '../generated/prisma/index.js';
+import { MonthlyDataUsage, Prisma, Sim } from '../generated/prisma/index.js';
+import { SimStatus } from '../types/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuerySimDto } from './dto/query-sim.dto';
 import { parseSortParam } from './dto/query-sim.dto';
 import {
   UpdateSimStatusDto,
   SimStatusAction,
+  BatchUpdateSimStatusDto,
 } from './dto/update-sim-status.dto';
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
-import { QueryGroupMembersDto } from './dto/query-group-members.dto.js';
+import { QueryGroupMembersDto } from './dto/query-group-members.dto';
+import mapSortStringToOrderInput from 'src/utils/mapSortStringToOrderInput';
 
 @Injectable()
 export class SimsService {
@@ -34,8 +37,10 @@ export class SimsService {
       imsi,
       ratingPlanId,
       groupName,
+      groupId,
       simType,
       sort,
+      sogIsOwner,
     } = query;
 
     const where: Prisma.SimWhereInput = {
@@ -44,23 +49,32 @@ export class SimsService {
       ...(ratingPlanId && { ratingPlanId }),
       ...(systemStatus && { systemStatus }),
       ...(groupName && { groupName }),
+      ...(imsi && { imsi: { contains: imsi, mode: 'insensitive' } }),
+      ...(contractCode && {
+        contractCode: { contains: contractCode, mode: 'insensitive' },
+      }),
+      ...(groupId?.length && {
+        simGroups: { some: { groupId: { in: groupId } } },
+      }),
       ...(status && { status }),
       ...(simType !== undefined && { simType }),
+      ...(sogIsOwner !== undefined && { sogIsOwner: Boolean(sogIsOwner) }), // 1 → true, 0 → false, undefined → ignore
       ...(search && {
-        OR: [
-          { phoneNumber: { contains: search, mode: 'insensitive' } },
-          { imsi: { contains: imsi, mode: 'insensitive' } },
-          { contractCode: { contains: contractCode, mode: 'insensitive' } },
-        ],
+        phoneNumber: { contains: search, mode: 'insensitive' },
       }),
     };
 
-    const orderBy: Prisma.SimOrderByWithRelationInput[] = parseSortParam(
-      sort,
-    ).map(
-      ({ field, order }) =>
-        ({ [field]: order }) as Prisma.SimOrderByWithRelationInput,
-    );
+    const orderBy: Prisma.SimOrderByWithRelationInput[] =
+      mapSortStringToOrderInput<Sim>(sort, [
+        'contractCode',
+        'phoneNumber',
+        'groupName',
+        'imsi',
+        'ratingPlanName',
+        'usedMB',
+        'firstUsedAt',
+        'sogIsOwner',
+      ]);
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.sim.findMany({
@@ -68,11 +82,99 @@ export class SimsService {
         orderBy: orderBy.length ? orderBy : [{ phoneNumber: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
+        include: {
+          monthlyDataUsages: {
+            select: {
+              month: true,
+              dataUsedMB: true,
+            },
+          },
+          simGroups: {
+            select: {
+              group: {
+                select: {
+                  name: true,
+                  id: true,
+                },
+              },
+            },
+          },
+        },
       }),
       this.prisma.sim.count({ where }),
     ]);
 
-    return { data: data.map((s) => this.formatSim(s)), total, page, pageSize };
+    // Collect all group-IDs and product-codes present in this page so we can
+    // fetch alert configs that target groups or product codes (not just simId).
+    const simIds = data.map((s) => s.id);
+    const groupIds = [
+      ...new Set(
+        data.flatMap(
+          (s) =>
+            s.simGroups
+              ?.map((sg: { group?: { id?: string } }) => sg.group?.id)
+              .filter((id): id is string => !!id) ?? [],
+        ),
+      ),
+    ];
+    const productCodes = [
+      ...new Set(
+        data.map((s) => s.productCode).filter((c): c is string => !!c),
+      ),
+    ];
+
+    const allMatchingAlerts = await this.prisma.alertConfig.findMany({
+      where: {
+        OR: [
+          { simId: { in: simIds } },
+          ...(groupIds.length ? [{ groupId: { in: groupIds } }] : []),
+          ...(productCodes.length
+            ? [{ productCode: { in: productCodes } }]
+            : []),
+          { simId: null, groupId: null, productCode: null }, // global alerts
+        ],
+      },
+    });
+
+    const simsWithAlerts = data.map((s) => {
+      const simGroupIds =
+        s.simGroups
+          ?.map((sg: { group?: { id?: string } }) => sg.group?.id)
+          .filter((id): id is string => !!id) ?? [];
+
+      const alertConfigs = allMatchingAlerts.filter(
+        (a) =>
+          (!a.simId && !a.groupId && !a.productCode) || // global
+          a.simId === s.id ||
+          (a.groupId && simGroupIds.includes(a.groupId)) ||
+          (a.productCode && a.productCode === s.productCode),
+      );
+
+      return { ...s, alertConfigs };
+    });
+
+    return {
+      data: simsWithAlerts.map((s) => this.formatSim(s)),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  async getAllSims() {
+    const sims = await this.prisma.sim.findMany({
+      select: {
+        id: true,
+        phoneNumber: true,
+        ratingPlanName: true,
+        productCode: true,
+        status: true,
+        usedMB: true,
+        firstUsedAt: true,
+      },
+      orderBy: { phoneNumber: 'asc' },
+    });
+    return sims;
   }
 
   async findOne(id: string): Promise<Sim> {
@@ -81,24 +183,84 @@ export class SimsService {
     return sim;
   }
 
+  async findAllSimsGroupByRatingPlan() {
+    const sims = await this.prisma.sim.groupBy({
+      by: ['ratingPlanId', 'ratingPlanName'],
+      _count: {
+        _all: true,
+      },
+      _sum: {
+        usedMB: true,
+      },
+      orderBy: {
+        ratingPlanName: 'asc',
+      },
+    });
+    return sims;
+  }
+
   async updateStatus(id: string, dto: UpdateSimStatusDto) {
     const sim = await this.findOne(id);
 
     if (dto.action === SimStatusAction.CONFIRM) {
-      if (sim.status !== 'Đã hoạt động') {
+      if (sim.status !== SimStatus.ACTIVE) {
         throw new BadRequestException(
           'Chỉ có thể xác nhận SIM đang ở trạng thái "Đã hoạt động"',
         );
       }
       return this.prisma.sim.update({
         where: { id },
-        data: { status: 'Đã xác nhận', confirmedAt: new Date() },
+        data: { status: SimStatus.CONFIRMED, confirmedAt: new Date() },
       });
     }
 
     return this.prisma.sim.update({
       where: { id },
-      data: { status: 'Mới', usedMB: 0, firstUsedAt: null, confirmedAt: null },
+      data: {
+        status: SimStatus.NEW,
+        usedMB: 0,
+        firstUsedAt: null,
+        confirmedAt: null,
+      },
+    });
+  }
+
+  async batchUpdateStatus(dto: BatchUpdateSimStatusDto) {
+    const { ids, action } = dto;
+
+    console.log('IDS RECEIVED FOR BATCH UPDATE:', ids, 'ACTION:', action);
+
+    if (action === SimStatusAction.CONFIRM) {
+      const simsToConfirm = await this.prisma.sim.findMany({
+        where: { id: { in: ids } },
+        select: { id: true },
+      });
+
+      console.log(
+        'SIMs to confirm:',
+        ids,
+        simsToConfirm.map((s) => s.id),
+      );
+
+      if (simsToConfirm.length === 0) {
+        throw new BadRequestException('Không có SIM để xác nhận');
+      }
+
+      return this.prisma.sim.updateMany({
+        where: { id: { in: simsToConfirm.map((s) => s.id) } },
+        data: { status: SimStatus.CONFIRMED, confirmedAt: new Date() },
+      });
+    }
+
+    // Reset về trạng thái NEW
+    return this.prisma.sim.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status: SimStatus.NEW,
+        usedMB: 0,
+        firstUsedAt: null,
+        confirmedAt: null,
+      },
     });
   }
 
@@ -115,25 +277,38 @@ export class SimsService {
   async getGroupMembers(groupId: string, query: QueryGroupMembersDto) {
     const { page = 1, pageSize = 50, msisdn } = query;
 
-    const where: Prisma.SimGroupMemberWhereInput = {
-      groupId,
-      ...(msisdn && { msisdn: { contains: msisdn, mode: 'insensitive' } }),
+    const where: Prisma.SimWhereInput = {
+      sogGroupId: groupId,
+      sogIsOwner: false,
+      ...(msisdn && { phoneNumber: { contains: msisdn, mode: 'insensitive' } }),
     };
 
     const [data, total] = await this.prisma.$transaction([
-      this.prisma.simGroupMember.findMany({
+      this.prisma.sim.findMany({
         where,
-        orderBy: { msisdn: 'asc' },
+        orderBy: { phoneNumber: 'asc' },
+        select: {
+          phoneNumber: true,
+          ratingPlanName: true,
+          status: true,
+          usedMB: true,
+        },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      this.prisma.simGroupMember.count({ where }),
+      this.prisma.sim.count({ where }),
     ]);
 
     return { data, total, page, pageSize };
   }
 
-  formatSim(sim: Sim) {
+  formatSim(
+    sim: Sim & {
+      monthlyDataUsages?: Pick<MonthlyDataUsage, 'month' | 'dataUsedMB'>[];
+      simGroups?: unknown[];
+      alertConfigs?: unknown[];
+    },
+  ) {
     return {
       id: sim.id,
       phoneNumber: sim.phoneNumber,
@@ -162,6 +337,9 @@ export class SimsService {
       customerCode: sim.customerCode,
       provinceCode: sim.provinceCode,
       groupName: sim.groupName,
+      monthlyDataUsages: sim.monthlyDataUsages ?? [],
+      simGroups: sim.simGroups ?? [],
+      alertConfigs: sim.alertConfigs ?? [],
     };
   }
 }

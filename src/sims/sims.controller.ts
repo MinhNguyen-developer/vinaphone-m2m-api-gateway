@@ -8,7 +8,10 @@ import {
 } from '@nestjs/swagger';
 import { SimsService } from './sims.service';
 import { QuerySimDto } from './dto/query-sim.dto';
-import { UpdateSimStatusDto } from './dto/update-sim-status.dto';
+import {
+  BatchUpdateSimStatusDto,
+  UpdateSimStatusDto,
+} from './dto/update-sim-status.dto';
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
 import { QueryGroupMembersDto } from './dto/query-group-members.dto';
 
@@ -22,6 +25,23 @@ export class SimsController {
   @ApiOperation({ summary: 'Lấy danh sách SIM M2M' })
   findAll(@Query() query: QuerySimDto) {
     return this.simsService.findAll(query);
+  }
+
+  @Get('all')
+  @ApiOperation({
+    summary:
+      'Lấy tất cả SIM (không phân trang, chỉ trả về id/phoneNumber/ratingPlanName/productCode)',
+  })
+  getAllSims() {
+    return this.simsService.getAllSims();
+  }
+
+  @Get('group/rating-plans')
+  @ApiOperation({
+    summary: 'Lấy danh sách SIM theo nhóm gói cước (SOG) và gói cước',
+  })
+  findAllSimsGroupByRatingPlan() {
+    return this.simsService.findAllSimsGroupByRatingPlan();
   }
 
   @Get('group-members/:groupId')
@@ -42,6 +62,12 @@ export class SimsController {
   @ApiParam({ name: 'id', description: 'UUID của SIM' })
   updateStatus(@Param('id') id: string, @Body() dto: UpdateSimStatusDto) {
     return this.simsService.updateStatus(id, dto);
+  }
+
+  @Patch('batch-update-status')
+  @ApiOperation({ summary: 'Cập nhật trạng thái quản lý nội bộ của nhiều SIM' })
+  batchUpdateStatus(@Body() body: BatchUpdateSimStatusDto) {
+    return this.simsService.batchUpdateStatus(body);
   }
 
   @Patch(':id/first-used-at')

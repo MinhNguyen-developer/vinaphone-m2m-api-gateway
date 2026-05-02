@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import dayjs from 'dayjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { SimStatus } from '../types/common';
 import type {
   VinaphoneLoginResponse,
   QuickSearchSimItem,
@@ -14,7 +15,10 @@ import type {
   VinaphoneApiBaseResponse,
   RatingPlanItem,
   GroupSimItem,
+  VinaphoneCustomersItem,
+  VinaphoneContractItem,
   UsedDataItem,
+  VinaphoneMonthlyDataUsageItem,
 } from './vinaphone-api.types';
 
 /** Parse the `sog` JSON string, returning the first entry or null */
@@ -84,10 +88,20 @@ export class SyncService implements OnModuleInit {
       cronExpression,
       () => void this.syncRatingPlans(),
     );
+    const syncCustomersJob = new CronJob(
+      cronExpression,
+      () => void this.syncCustomers(),
+    );
+    const syncContractsJob = new CronJob(
+      cronExpression,
+      () => void this.syncContracts(),
+    );
 
     this.schedulerRegistry.addCronJob('syncSims', syncSimJob);
     this.schedulerRegistry.addCronJob('syncRatingPlans', syncRatingPlansJob);
     this.schedulerRegistry.addCronJob('syncGroupSims', syncGroupSimsJob);
+    this.schedulerRegistry.addCronJob('syncCustomers', syncCustomersJob);
+    this.schedulerRegistry.addCronJob('syncContracts', syncContractsJob);
 
     this.logger.log(`Sync cron scheduled: ${cronExpression}`);
 
@@ -95,6 +109,7 @@ export class SyncService implements OnModuleInit {
     syncSimJob.start();
     syncRatingPlansJob.start();
     syncGroupSimsJob.start();
+    syncCustomersJob.start();
   }
 
   // ─── Token management ──────────────────────────────────────────────────────
@@ -267,6 +282,38 @@ export class SyncService implements OnModuleInit {
         `Fetched usage data for ${usedDataMap.size} SIMs in ${Math.ceil(allVinaSims.length / USAGE_BATCH_SIZE)} batch(es)`,
       );
 
+      // ── Fetch monthly data usage for MonthlyDataUsage table ──────────────
+      const MONTHLY_BATCH_SIZE = 20;
+      const allMsisdns = allVinaSims.map((s) => s.msisdn);
+      const monthlyDataItems: Array<{
+        msisdn: string;
+        item: VinaphoneMonthlyDataUsageItem;
+      }> = [];
+      for (let i = 0; i < allMsisdns.length; i += MONTHLY_BATCH_SIZE) {
+        const chunk = allMsisdns.slice(i, i + MONTHLY_BATCH_SIZE);
+        const batchNum = Math.floor(i / MONTHLY_BATCH_SIZE) + 1;
+        try {
+          const rawMonthly = await this.fetchMonthlyDataUsage(
+            chunk,
+            dataTimeout,
+          );
+          for (const item of rawMonthly) {
+            monthlyDataItems.push({
+              msisdn: String(item.msisdn),
+              item,
+            });
+          }
+        } catch (err) {
+          this.logger.warn(
+            `fetchMonthlyDataUsage batch ${batchNum} failed — skipping`,
+            err,
+          );
+        }
+      }
+      this.logger.log(
+        `Fetched monthly data usage for ${monthlyDataItems.length} SIMs in ${Math.ceil(allMsisdns.length / MONTHLY_BATCH_SIZE)} batch(es)`,
+      );
+
       for (const vSim of allVinaSims) {
         const {
           customerName,
@@ -277,17 +324,24 @@ export class SyncService implements OnModuleInit {
           ratingPlanId,
           ratingPlanName,
           groupName,
+          contractDate,
         } = vSim;
         const msisdnStr = String(vSim.msisdn);
         const existing = simByPhone.get(msisdnStr);
 
         const newUsedMB = usedDataMap.get(Number(vSim.msisdn)) ?? 0;
 
-        // usagedData is in bytes → already converted to MB in bulk fetch above
-        const vinaphoneStatus = mapSimStatus(vSim.status);
-
         // Parse SOG (nhóm gói cước)
-        const sog = parseSog(vSim.sog);
+        // quickSearch sometimes returns sog=null — fall back to detail endpoint
+        const sog =
+          vSim.sog !== null
+            ? parseSog(vSim.sog)
+            : await this.fetchSimSog(
+                baseUrl,
+                headers,
+                timeout,
+                String(vSim.msisdn),
+              );
         const sogGroupId = sog?.id ?? null;
         const sogGroupName = sog?.ten_goi ?? null;
         const sogMaGoi = sog?.ma_goi ?? null;
@@ -296,7 +350,7 @@ export class SyncService implements OnModuleInit {
         const sharedData: Record<string, unknown> = {
           usedMB: newUsedMB,
           syncedAt: now,
-          systemStatus: vSim.connectionStatus ?? vinaphoneStatus,
+          systemStatus: mapSimStatus(vSim.status),
           imsi: vSim.imsi ? String(vSim.imsi) : (existing?.imsi ?? null),
           contractCode: vSim.contractCode ?? existing?.contractCode ?? null,
           sogGroupId,
@@ -311,17 +365,18 @@ export class SyncService implements OnModuleInit {
           ratingPlanId,
           ratingPlanName,
           groupName, // newly added field from quickSearch response (not in original sims-mgmt API)
+          contractDate,
         };
 
-        // Auto-transition: Mới → Đã hoạt động when usedMB first > 0
-        const currentStatus = existing?.status ?? 'Mới';
-        if (currentStatus === 'Mới' && newUsedMB > 0) {
-          sharedData['status'] = 'Đã hoạt động';
+        // Auto-transition: NEW → ACTIVE when usedMB first > 0
+        const currentStatus = existing?.status ?? SimStatus.NEW;
+        if (currentStatus === SimStatus.NEW && newUsedMB > 0) {
+          sharedData['status'] = SimStatus.ACTIVE;
           sharedData['firstUsedAt'] = vSim.activatedDate
             ? new Date(vSim.activatedDate)
             : now;
           if (existing) {
-            this.logger.log(`SIM ${msisdnStr} chuyển sang "Đã hoạt động"`);
+            this.logger.log(`SIM ${msisdnStr} chuyển sang ACTIVE (2)`);
           }
         }
 
@@ -337,6 +392,9 @@ export class SyncService implements OnModuleInit {
             productCode:
               vSim.ratingPlanName ?? String(vSim.ratingPlanId ?? 'unknown'),
             createdAt: vSim.activatedDate ? new Date(vSim.activatedDate) : now,
+            contractDate: vSim.contractDate
+              ? new Date(vSim.contractDate)
+              : null,
           },
         });
         usageUpserts.push({ phoneNumber: msisdnStr, usedMB: newUsedMB });
@@ -354,7 +412,11 @@ export class SyncService implements OnModuleInit {
               create: {
                 phoneNumber,
                 productCode: createExtra['productCode'] as string,
+                status:
+                  (createExtra['status'] as number | undefined) ??
+                  SimStatus.NEW,
                 createdAt: createExtra['createdAt'] as Date,
+                contractDate: createExtra['contractDate'] as Date | null,
                 ...data,
               },
             }),
@@ -401,6 +463,43 @@ export class SyncService implements OnModuleInit {
           groupName,
         );
       }
+
+      // Upsert MonthlyDataUsage in batches
+      for (let i = 0; i < monthlyDataItems.length; i += 50) {
+        const batch = monthlyDataItems.slice(i, i + 50);
+        await this.prisma.$transaction(
+          batch.map(({ msisdn, item }) =>
+            this.prisma.monthlyDataUsage.upsert({
+              where: { msisdn_month: { msisdn, month: currentMonth } },
+              update: {
+                dataUsedMB: item.dataUsed,
+                smsNoiMangUsed: item.smsNoiMangUsed,
+                smsNgoaiMangUsed: item.smsNgoaiMangUsed,
+                smsQuocTeUsed: item.smsQuocTeUsed,
+                totalData: item.totalData,
+                totalSmsNoiMang: item.totalSmsNoiMang,
+                totalSmsNgoaiMang: item.totalSmsNgoaiMang,
+                totalSmsQuocTe: item.totalSmsQuocTe,
+              },
+              create: {
+                msisdn,
+                month: currentMonth,
+                dataUsedMB: item.dataUsed,
+                smsNoiMangUsed: item.smsNoiMangUsed,
+                smsNgoaiMangUsed: item.smsNgoaiMangUsed,
+                smsQuocTeUsed: item.smsQuocTeUsed,
+                totalData: item.totalData,
+                totalSmsNoiMang: item.totalSmsNoiMang,
+                totalSmsNgoaiMang: item.totalSmsNgoaiMang,
+                totalSmsQuocTe: item.totalSmsQuocTe,
+              },
+            }),
+          ),
+        );
+      }
+      this.logger.log(
+        `Upserted MonthlyDataUsage for ${monthlyDataItems.length} SIMs`,
+      );
 
       await this.recalculateMasterSimUsage();
       this.logger.log(
@@ -677,6 +776,176 @@ export class SyncService implements OnModuleInit {
       if (data.last || data.content.length === 0) break;
       page++;
     }
+  }
+
+  /**
+   * Sync customers from Vinaphone API and upsert into local DB.
+   */
+  private async syncCustomers() {
+    this.logger.log('Starting customer sync from Vinaphone API...');
+    try {
+      const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
+      const timeout =
+        this.configService.get<number>('vinaphone.timeoutMs') ?? 10_000;
+      const token = await this.getToken();
+      const headers = this.authHeaders(token);
+
+      const pageSize = 1000;
+      let page = 0;
+
+      const { data } = await this.withRetry('fetch customers', () =>
+        firstValueFrom(
+          this.httpService.get<
+            VinaphoneApiBaseResponse<VinaphoneCustomersItem>
+          >(`${baseUrl}/sim-mgmt/dropdown`, {
+            headers,
+            timeout,
+            params: {
+              page,
+              size: pageSize,
+              type: 'customer',
+              sort: 'name,asc',
+            },
+          }),
+        ),
+      );
+
+      for (const cust of data.content) {
+        await this.prisma.customer.upsert({
+          where: { customerCode: cust.customerCode },
+          update: {
+            customerName: cust.customerName,
+            syncedAt: new Date(),
+          },
+          create: {
+            customerCode: cust.customerCode,
+            customerName: cust.customerName,
+            syncedAt: new Date(),
+          },
+        });
+      }
+
+      this.logger.log(
+        `Customer sync completed: ${data.content.length} customers processed.`,
+      );
+    } catch (err) {
+      this.logger.error('Customer sync failed', (err as Error).stack);
+    }
+  }
+
+  /**
+   * Sync contracts from Vinaphone API and upsert into local DB.
+   */
+  private async syncContracts() {
+    this.logger.log('Starting contract sync from Vinaphone API...');
+    try {
+      const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
+      const timeout =
+        this.configService.get<number>('vinaphone.timeoutMs') ?? 10_000;
+      const token = await this.getToken();
+      const headers = this.authHeaders(token);
+
+      const pageSize = 1000;
+      let page = 0;
+
+      const { data } = await this.withRetry('fetch contracts', () =>
+        firstValueFrom(
+          this.httpService.get<VinaphoneApiBaseResponse<VinaphoneContractItem>>(
+            `${baseUrl}/contract/search`,
+            {
+              headers,
+              timeout,
+              params: {
+                page,
+                size: pageSize,
+              },
+            },
+          ),
+        ),
+      );
+
+      for (const contract of data.content) {
+        const { id, contractDate, ...restContract } = contract;
+        await this.prisma.contract.upsert({
+          where: { contractCode: contract.contractCode },
+          update: {
+            ...restContract,
+            contractId: id,
+            contractDate: contractDate ? new Date(contractDate) : null,
+            syncedAt: new Date(),
+          },
+          create: {
+            ...restContract,
+            contractId: id,
+            contractDate: contractDate ? new Date(contractDate) : null,
+            syncedAt: new Date(),
+          },
+        });
+      }
+
+      this.logger.log(
+        `Contract sync completed: ${data.content.length} contracts processed.`,
+      );
+    } catch (err) {
+      this.logger.error('Contract sync failed', (err as Error).stack);
+    }
+  }
+
+  /**
+   * Fetch the sog field for a single SIM via GET /sim-mgmt/<msisdn>.
+   * Used as a fallback when quickSearch returns sog=null.
+   */
+  private async fetchSimSog(
+    baseUrl: string,
+    headers: Record<string, string>,
+    timeout: number,
+    msisdn: string,
+  ): Promise<SogItem | null> {
+    try {
+      const { data } = await this.withRetry(`fetchSimDetail ${msisdn}`, () =>
+        firstValueFrom(
+          this.httpService.get<Pick<QuickSearchSimItem, 'sog'>>(
+            `${baseUrl}/sim-mgmt/${msisdn}`,
+            { headers, timeout },
+          ),
+        ),
+      );
+      return parseSog(data.sog);
+    } catch (err) {
+      this.logger.warn(
+        `fetchSimDetail ${msisdn} failed — sog will be null`,
+        err,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Get monthly data usage for all SIMs
+   */
+  private async fetchMonthlyDataUsage(msisdns: number[], timeout?: number) {
+    const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
+    const effectiveTimeout =
+      timeout ??
+      this.configService.get<number>('vinaphone.dataTimeoutMs') ??
+      120_000;
+    const token = await this.getToken();
+    const headers = this.authHeaders(token);
+
+    const allUsage = await this.withRetry('fetch monthly data usage', () =>
+      firstValueFrom(
+        this.httpService.post<VinaphoneMonthlyDataUsageItem[]>(
+          `${baseUrl}/sim-mgmt/searchSanLuongThueBao`,
+          msisdns,
+          {
+            headers,
+            timeout: effectiveTimeout,
+          },
+        ),
+      ),
+    );
+
+    return allUsage.data;
   }
 
   private async recalculateMasterSimUsage() {

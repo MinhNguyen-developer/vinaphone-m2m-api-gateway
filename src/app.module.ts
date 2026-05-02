@@ -14,6 +14,8 @@ import { AlertsModule } from './alerts/alerts.module';
 import { SyncModule } from './sync/sync.module';
 import { RatingPlanModule } from './rating-plan/rating-plan.module';
 import { SimGroupModule } from './sim-group/sim-group.module';
+import { ContractsModule } from './contracts/contracts.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { SimGroupModule } from './sim-group/sim-group.module';
     SyncModule,
     RatingPlanModule,
     SimGroupModule,
+    ContractsModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}
