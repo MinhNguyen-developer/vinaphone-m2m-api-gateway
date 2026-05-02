@@ -71,7 +71,7 @@ export interface QuickSearchSimItem {
   customerName: string;
   customerCode: string;
   contractCode: string;
-  contractDate: string | null;
+  contractDate: string | null; // E.g: "2025-05-04T17:00:00.000+00:00"
   activatedDate: string | null;
   contractInfo: string | null;
   groupName: string | null;
@@ -487,4 +487,37 @@ export interface UpdateShareGroupRequest {
   groupCode?: string;
   description?: string;
   listSub?: ShareGroupSubscriber[];
+}
+
+export interface VinaphoneCustomersItem {
+  customerName: string;
+  customerCode: string;
+}
+
+export interface VinaphoneContractItem {
+  id: number;
+  contractCode: string;
+  customerCode: string;
+  customerName: string;
+  contractor: string | null;
+  contractDate: string;
+  centerCode: string;
+  contactPhone: string;
+  contactAddress: string;
+  paymentName: string;
+  paymentAddress: string;
+  routeCode: string;
+  birthday: string; // E.g. "01-04-2026"
+}
+
+export interface VinaphoneMonthlyDataUsageItem {
+  msisdn: number;
+  dataUsed: number | null;
+  smsNoiMangUsed: number | null;
+  smsNgoaiMangUsed: number | null;
+  smsQuocTeUsed: number | null;
+  totalData: number;
+  totalSmsNoiMang: number | null;
+  totalSmsNgoaiMang: number | null;
+  totalSmsQuocTe: number | null;
 }

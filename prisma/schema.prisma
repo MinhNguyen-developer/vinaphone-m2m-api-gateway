@@ -22,7 +22,8 @@ model Sim {
   productCode   String    @map("product_code") @db.VarChar(50)
   masterSimCode String?   @map("master_sim_code") @db.VarChar(20)
   systemStatus  String?   @map("system_status") @db.VarChar(20)
-  status        String    @default("Mới") @db.VarChar(30)
+  /// 1 = Mới, 2 = Đã hoạt động, 3 = Đã xác nhận
+  status        Int       @default(1)
   usedMB        Int       @default(0) @map("used_mb")
   firstUsedAt   DateTime? @map("first_used_at")
   confirmedAt   DateTime? @map("confirmed_at")
@@ -41,9 +42,10 @@ model Sim {
    */
   sogIsOwner   Boolean? @map("sog_is_owner")
 
-  customerName String? @map("customer_name") @db.VarChar(255)
-  customerCode String? @map("customer_code") @db.VarChar(100)
-  contractInfo String? @map("contract_info") @db.Text
+  customerName String?   @map("customer_name") @db.VarChar(255)
+  customerCode String?   @map("customer_code") @db.VarChar(100)
+  contractInfo String?   @map("contract_info") @db.Text
+  contractDate DateTime? @map("contract_date") @db.Date
 
   provinceCode String? @map("province_code") @db.VarChar(20)
 
@@ -52,10 +54,13 @@ model Sim {
 
   groupName String? @map("group_name") @db.VarChar(255)
 
-  usageHistory UsageHistory[]
-  simGroups    SimGroup[]
-  alertChecks  AlertCheck[]
-  alertConfigs AlertConfig[]
+  usageHistory      UsageHistory[]
+  simGroups         SimGroup[]
+  alertChecks       AlertCheck[]
+  alertConfigs      AlertConfig[]
+  contracts         Contract[]         @relation("ContractSims")
+  monthlyDataUsages MonthlyDataUsage[]
+  ratingPlan        RatingPlan?        @relation(fields: [ratingPlanId], references: [ratingPlanId], onDelete: SetNull)
 
   @@map("sims")
 }
@@ -116,14 +121,15 @@ model SimGroup {
 }
 
 model AlertConfig {
-  id          String   @id @default(uuid()) @db.Uuid
-  label       String   @db.VarChar(200)
-  thresholdMB Int      @map("threshold_mb")
-  simId       String?  @map("sim_id") @db.Uuid
-  groupId     String?  @map("group_id") @db.Uuid
-  productCode String?  @map("product_code") @db.VarChar(50)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
+  id           String   @id @default(uuid()) @db.Uuid
+  label        String   @db.VarChar(200)
+  thresholdMB  Int      @map("threshold_mb")
+  simId        String?  @map("sim_id") @db.Uuid
+  groupId      String?  @map("group_id") @db.Uuid
+  productCode  String?  @map("product_code") @db.VarChar(50)
+  ratingPlanId Int?     @map("rating_plan_id") @db.Integer
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
 
   sim         Sim?         @relation(fields: [simId], references: [id], onDelete: Cascade)
   group       Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -167,5 +173,60 @@ model RatingPlan {
   name         String    @db.VarChar(255)
   syncedAt     DateTime? @map("synced_at")
 
+  sims Sim[]
+
   @@map("rating_plans")
+}
+
+model Customer {
+  id           String     @id @default(uuid()) @db.Uuid
+  customerName String     @map("customer_name") @db.VarChar(255)
+  customerCode String     @unique @map("customer_code") @db.VarChar(100)
+  syncedAt     DateTime?  @map("synced_at")
+  contracts    Contract[]
+
+  @@map("customers")
+}
+
+model Contract {
+  id             String    @id @default(uuid()) @db.Uuid
+  contractId     Int       @unique @map("contract_id") @db.Integer
+  contractCode   String    @unique @map("contract_code") @db.VarChar(50)
+  contractDate   DateTime? @map("contract_date") @db.Date
+  syncedAt       DateTime? @map("synced_at")
+  contractor     String?   @map("contractor") @db.VarChar(50)
+  customerName   String?   @map("customer_name") @db.VarChar(255)
+  centerCode     String?   @map("center_code") @db.VarChar(20)
+  customerCode   String?   @map("customer_code") @db.VarChar(100)
+  contactPhone   String?   @map("contact_phone") @db.VarChar(20)
+  contactAddress String?   @map("contact_address") @db.Text
+  paymentName    String?   @map("payment_name") @db.VarChar(255)
+  paymentAddress String?   @map("payment_address") @db.Text
+  routeCode      String?   @map("route_code") @db.VarChar(50)
+  birthday       DateTime? @map("birthday") @db.Date
+
+  // Quan hệ với Sim (1 contract có thể có nhiều sim)
+  sims     Sim[]     @relation("ContractSims")
+  customer Customer? @relation(fields: [customerCode], references: [customerCode], onDelete: SetNull)
+
+  @@map("contracts")
+}
+
+model MonthlyDataUsage {
+  id                String @id @default(uuid()) @db.Uuid
+  msisdn            String @db.VarChar(15)
+  month             String @db.Char(7) // "YYYY-MM"
+  smsNoiMangUsed    Int?   @map("sms_noi_mang_used")
+  smsNgoaiMangUsed  Int?   @map("sms_ngoai_mang_used")
+  dataUsedMB        Int?   @map("data_used_mb")
+  smsQuocTeUsed     Int?   @map("sms_quoc_te_used")
+  totalData         Int?   @map("total_data")
+  totalSmsNoiMang   Int?   @map("total_sms_noi_mang")
+  totalSmsNgoaiMang Int?   @map("total_sms_ngoai_mang")
+  totalSmsQuocTe    Int?   @map("total_sms_quoc_te_used")
+
+  sim Sim @relation(fields: [msisdn], references: [phoneNumber], onDelete: Cascade)
+
+  @@unique([msisdn, month])
+  @@map("monthly_data_usage")
 }

@@ -2,12 +2,16 @@ import {
   IsOptional,
   IsString,
   IsInt,
+  IsUUID,
+  IsArray,
   Min,
   Max,
   Matches,
+  IsEnum,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { SimStatus } from '../../types/common';
 
 // Allowed sortable columns (whitelist to prevent arbitrary field injection)
 const SORTABLE_FIELDS = [
@@ -74,10 +78,14 @@ export class QuerySimDto {
   @IsString()
   systemStatus?: string;
 
-  @ApiPropertyOptional({ enum: ['Mới', 'Đã hoạt động', 'Đã xác nhận'] })
+  @ApiPropertyOptional({
+    enum: SimStatus,
+    description: '1=Mới, 2=Đã hoạt động, 3=Đã xác nhận',
+  })
   @IsOptional()
-  @IsString()
-  status?: string;
+  @Type(() => Number)
+  @IsEnum(SimStatus)
+  status?: SimStatus;
 
   @ApiPropertyOptional({ description: 'Tìm theo SĐT' })
   @IsOptional()
@@ -107,12 +115,29 @@ export class QuerySimDto {
   groupName?: string;
 
   @ApiPropertyOptional({
+    description: 'Lọc theo group UUID(s). Có thể truyền nhiều giá trị.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
+  @IsArray()
+  @IsUUID('4', { each: true })
+  groupId?: string[];
+
+  @ApiPropertyOptional({
     description: 'Tìm theo loại SIM (0: Sim M2M, 1: eSIM)',
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   simType?: number;
+
+  @ApiPropertyOptional({
+    description: 'Tìm sim thành viên hoặc chủ nhóm gói cước (SOG)',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  sogIsOwner?: Number;
 
   @ApiPropertyOptional({
     description:

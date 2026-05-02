@@ -13,9 +13,9 @@ export class UsageHistoryService {
     const sim = await this.prisma.sim.findUnique({ where: { phoneNumber } });
     if (!sim) throw new NotFoundException(`SIM ${phoneNumber} không tồn tại`);
 
-    const history = await this.prisma.usageHistory.findMany({
+    const history = await this.prisma.monthlyDataUsage.findMany({
       where: {
-        simId: sim.id,
+        msisdn: sim.phoneNumber,
         ...(fromMonth && { month: { gte: fromMonth } }),
         ...(toMonth && { month: { lte: toMonth } }),
       },
@@ -25,7 +25,7 @@ export class UsageHistoryService {
     return {
       phoneNumber: sim.phoneNumber,
       imsi: sim.imsi,
-      history: history.map((h) => ({ month: h.month, usedMB: h.usedMB })),
+      history: history,
     };
   }
 }

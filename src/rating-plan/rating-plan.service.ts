@@ -27,4 +27,10 @@ export class RatingPlanService {
 
     return { data, total, page, pageSize };
   }
+
+  async findByRatingPlanId(ratingPlanId: number) {
+    return this.prisma.ratingPlan.findUnique({
+      where: { ratingPlanId },
+    });
+  }
 }
