@@ -57,6 +57,13 @@ export class SimsController {
     return this.simsService.getGroupMembers(groupId, query);
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Lấy chi tiết một SIM theo ID' })
+  @ApiParam({ name: 'id', description: 'UUID của SIM' })
+  findDetail(@Param('id') id: string) {
+    return this.simsService.findDetail(id);
+  }
+
   @Patch(':id/status')
   @ApiOperation({ summary: 'Cập nhật trạng thái quản lý nội bộ của SIM' })
   @ApiParam({ name: 'id', description: 'UUID của SIM' })

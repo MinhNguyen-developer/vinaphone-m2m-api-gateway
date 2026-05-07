@@ -21,4 +21,9 @@ export class QueryGroupMembersDto {
   @IsOptional()
   @IsString()
   msisdn?: string;
+
+  @ApiPropertyOptional({ description: 'e.g. "usedMB:desc"' })
+  @IsOptional()
+  @IsString()
+  sort?: string;
 }
