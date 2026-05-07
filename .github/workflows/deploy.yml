@@ -67,18 +67,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Write SSH key
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2_key.pem
-          chmod 600 ~/.ssh/ec2_key.pem
-
       - name: Copy deployment files to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key_path: ~/.ssh/ec2_key.pem
+          key: ${{ secrets.EC2_SSH_KEY }}
           source: "deploy/docker-compose.prod.yml,deploy/nginx.conf"
           target: "/home/${{ secrets.EC2_USER }}/vinaphone-m2m"
           strip_components: 1
@@ -88,7 +82,7 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key_path: ~/.ssh/ec2_key.pem
+          key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
 
