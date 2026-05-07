@@ -103,7 +103,10 @@ export class AlertsService {
 
   async findTriggered(ratingPlanId?: number) {
     const activeAlerts = await this.prisma.alertConfig.findMany({
-      where: { active: true },
+      where: {
+        active: true,
+        ...(ratingPlanId && { ratingPlanId }),
+      },
     });
 
     const results: Array<{
@@ -120,7 +123,7 @@ export class AlertsService {
           simGroups: { some: { groupId: alert.groupId } },
         }),
         ...(alert.productCode && { productCode: alert.productCode }),
-        ...(ratingPlanId && { ratingPlanId }),
+        ...(alert.ratingPlanId && { ratingPlanId: alert.ratingPlanId }),
       };
 
       const sims = await this.prisma.sim.findMany({ where: simWhere });

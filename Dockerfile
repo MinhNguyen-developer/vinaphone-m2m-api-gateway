@@ -3,10 +3,9 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
-
 COPY prisma ./prisma
 COPY prisma.config.ts ./
+RUN npm ci
 
 RUN npx prisma generate
 
@@ -22,10 +21,9 @@ ENV NODE_ENV=production
 ENV TZ=Asia/Ho_Chi_Minh
 
 COPY package*.json ./
-RUN npm ci --omit=dev
-
 COPY prisma ./prisma
 COPY prisma.config.ts ./
+RUN npm ci --omit=dev
 COPY --from=builder /app/src/generated ./src/generated
 
 COPY --from=builder /app/dist ./dist

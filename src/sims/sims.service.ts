@@ -87,6 +87,7 @@ export class SimsService {
             select: {
               month: true,
               dataUsedMB: true,
+              totalData: true,
             },
           },
           simGroups: {
@@ -183,6 +184,22 @@ export class SimsService {
     return sim;
   }
 
+  async findDetail(id: string) {
+    const sim = await this.prisma.sim.findUnique({
+      where: { id },
+      include: {
+        monthlyDataUsages: {
+          select: { month: true, dataUsedMB: true, totalData: true },
+        },
+        simGroups: {
+          select: { group: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    if (!sim) throw new NotFoundException(`SIM ${id} không tồn tại`);
+    return this.formatSim(sim);
+  }
+
   async findAllSimsGroupByRatingPlan() {
     const sims = await this.prisma.sim.groupBy({
       by: ['ratingPlanId', 'ratingPlanName'],
@@ -275,7 +292,7 @@ export class SimsService {
   }
 
   async getGroupMembers(groupId: string, query: QueryGroupMembersDto) {
-    const { page = 1, pageSize = 50, msisdn } = query;
+    const { page = 1, pageSize = 50, msisdn, sort } = query;
 
     const where: Prisma.SimWhereInput = {
       sogGroupId: groupId,
@@ -283,10 +300,15 @@ export class SimsService {
       ...(msisdn && { phoneNumber: { contains: msisdn, mode: 'insensitive' } }),
     };
 
+    const orderBy = mapSortStringToOrderInput<Sim>(sort, [
+      'usedMB',
+      'phoneNumber',
+    ]) || [{ phoneNumber: 'asc' as const }];
+
     const [data, total] = await this.prisma.$transaction([
       this.prisma.sim.findMany({
         where,
-        orderBy: { phoneNumber: 'asc' },
+        orderBy,
         select: {
           phoneNumber: true,
           ratingPlanName: true,
@@ -304,7 +326,10 @@ export class SimsService {
 
   formatSim(
     sim: Sim & {
-      monthlyDataUsages?: Pick<MonthlyDataUsage, 'month' | 'dataUsedMB'>[];
+      monthlyDataUsages?: Pick<
+        MonthlyDataUsage,
+        'month' | 'dataUsedMB' | 'totalData'
+      >[];
       simGroups?: unknown[];
       alertConfigs?: unknown[];
     },
