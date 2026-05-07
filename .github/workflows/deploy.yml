@@ -1,9 +1,11 @@
 name: Deploy to EC2
 
 on:
-  push:
+  pull_request:
     branches:
       - main
+    types:
+      - closed
 
 env:
   IMAGE_NAME: vinaphone-m2m-api-gateway
@@ -13,6 +15,7 @@ env:
 jobs:
   build-and-push:
     name: Build & Push Docker Image
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: read
