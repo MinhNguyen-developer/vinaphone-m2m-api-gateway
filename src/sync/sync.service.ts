@@ -77,36 +77,36 @@ export class SyncService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    // const cronExpression =
-    //   this.configService.get<string>('syncCron') ?? CronExpression.EVERY_MINUTE;
-    // const syncSimJob = new CronJob(cronExpression, () => void this.syncSims());
-    // const syncGroupSimsJob = new CronJob(
-    //   cronExpression,
-    //   () => void this.syncGroupSims(),
-    // );
-    // const syncRatingPlansJob = new CronJob(
-    //   cronExpression,
-    //   () => void this.syncRatingPlans(),
-    // );
-    // const syncCustomersJob = new CronJob(
-    //   cronExpression,
-    //   () => void this.syncCustomers(),
-    // );
-    // const syncContractsJob = new CronJob(
-    //   cronExpression,
-    //   () => void this.syncContracts(),
-    // );
-    // this.schedulerRegistry.addCronJob('syncSims', syncSimJob);
-    // this.schedulerRegistry.addCronJob('syncRatingPlans', syncRatingPlansJob);
-    // this.schedulerRegistry.addCronJob('syncGroupSims', syncGroupSimsJob);
-    // this.schedulerRegistry.addCronJob('syncCustomers', syncCustomersJob);
-    // this.schedulerRegistry.addCronJob('syncContracts', syncContractsJob);
-    // this.logger.log(`Sync cron scheduled: ${cronExpression}`);
-    // // Start immediately on app launch
-    // syncSimJob.start();
-    // syncRatingPlansJob.start();
-    // syncGroupSimsJob.start();
-    // syncCustomersJob.start();
+    const cronExpression =
+      this.configService.get<string>('syncCron') ?? CronExpression.EVERY_MINUTE;
+    const syncSimJob = new CronJob(cronExpression, () => void this.syncSims());
+    const syncGroupSimsJob = new CronJob(
+      cronExpression,
+      () => void this.syncGroupSims(),
+    );
+    const syncRatingPlansJob = new CronJob(
+      cronExpression,
+      () => void this.syncRatingPlans(),
+    );
+    const syncCustomersJob = new CronJob(
+      cronExpression,
+      () => void this.syncCustomers(),
+    );
+    const syncContractsJob = new CronJob(
+      cronExpression,
+      () => void this.syncContracts(),
+    );
+    this.schedulerRegistry.addCronJob('syncSims', syncSimJob);
+    this.schedulerRegistry.addCronJob('syncRatingPlans', syncRatingPlansJob);
+    this.schedulerRegistry.addCronJob('syncGroupSims', syncGroupSimsJob);
+    this.schedulerRegistry.addCronJob('syncCustomers', syncCustomersJob);
+    this.schedulerRegistry.addCronJob('syncContracts', syncContractsJob);
+    this.logger.log(`Sync cron scheduled: ${cronExpression}`);
+    // Start immediately on app launch
+    syncSimJob.start();
+    syncRatingPlansJob.start();
+    syncGroupSimsJob.start();
+    syncCustomersJob.start();
   }
 
   // ─── Token management ──────────────────────────────────────────────────────
