@@ -4,6 +4,7 @@ import { ApiProperty } from '@nestjs/swagger';
 export enum SimStatusAction {
   CONFIRM = 'confirm',
   RESET = 'reset',
+  CANCEL = 'cancel',
 }
 
 export class UpdateSimStatusDto {
@@ -21,4 +22,14 @@ export class BatchUpdateSimStatusDto {
   @ApiProperty({ enum: SimStatusAction })
   @IsEnum(SimStatusAction)
   action!: SimStatusAction;
+}
+
+export class BulkCancelSimsByPhoneDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Danh sách số điện thoại cần hủy',
+  })
+  @IsArray()
+  @IsString({ each: true })
+  phoneNumbers!: string[];
 }

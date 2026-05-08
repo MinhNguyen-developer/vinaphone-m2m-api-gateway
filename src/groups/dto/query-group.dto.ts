@@ -26,4 +26,12 @@ export class QueryGroupDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Sắp xếp: "field:asc" hoặc "field:desc". Các field được hỗ trợ: name, createdAt, totalUsedMB',
+  })
+  @IsOptional()
+  @IsString()
+  sort?: string;
 }
