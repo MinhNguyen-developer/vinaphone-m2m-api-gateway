@@ -15,8 +15,10 @@ import {
   UpdateSimStatusDto,
   SimStatusAction,
   BatchUpdateSimStatusDto,
+  BulkCancelSimsByPhoneDto,
 } from './dto/update-sim-status.dto';
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
+import { UpdateNoteDto } from './dto/update-note.dto';
 import { QueryGroupMembersDto } from './dto/query-group-members.dto';
 import mapSortStringToOrderInput from 'src/utils/mapSortStringToOrderInput';
 
@@ -74,6 +76,7 @@ export class SimsService {
         'usedMB',
         'firstUsedAt',
         'sogIsOwner',
+        'status',
       ]);
 
     const [data, total] = await this.prisma.$transaction([
@@ -278,6 +281,37 @@ export class SimsService {
         firstUsedAt: null,
         confirmedAt: null,
       },
+    });
+  }
+
+  async bulkCancelSims(dto: BulkCancelSimsByPhoneDto) {
+    const { phoneNumbers } = dto;
+
+    const normalised = phoneNumbers
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    if (normalised.length === 0) {
+      throw new BadRequestException('Danh sách số điện thoại không được rỗng');
+    }
+
+    const result = await this.prisma.sim.updateMany({
+      where: { phoneNumber: { in: normalised } },
+      data: { status: SimStatus.CANCELLED },
+    });
+
+    return {
+      cancelled: result.count,
+      requested: normalised.length,
+      notFound: normalised.length - result.count,
+    };
+  }
+
+  async updateNote(id: string, dto: UpdateNoteDto) {
+    await this.findOne(id);
+    return this.prisma.sim.update({
+      where: { id },
+      data: { note: dto.note ?? null },
     });
   }
 

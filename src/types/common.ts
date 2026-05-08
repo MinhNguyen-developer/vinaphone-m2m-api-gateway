@@ -2,6 +2,7 @@ export enum SimStatus {
   NEW = 1,
   ACTIVE = 2,
   CONFIRMED = 3,
+  CANCELLED = 4,
 }
 
 export interface PaginatedResult<T> {
