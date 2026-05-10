@@ -27,6 +27,7 @@ model Sim {
   usedMB        Int       @default(0) @map("used_mb")
   firstUsedAt   DateTime? @map("first_used_at")
   confirmedAt   DateTime? @map("confirmed_at")
+  resetDate     DateTime? @map("reset_date")
   createdAt     DateTime  @map("created_at") @db.Date
   note          String?   @db.Text
   syncedAt      DateTime? @map("synced_at")
@@ -53,6 +54,8 @@ model Sim {
   ratingPlanName String? @map("rating_plan_name") @db.VarChar(255)
 
   groupName String? @map("group_name") @db.VarChar(255)
+
+  vinaphoneActivatedAt DateTime? @map("vinaphone_activated_at")
 
   usageHistory      UsageHistory[]
   simGroups         SimGroup[]

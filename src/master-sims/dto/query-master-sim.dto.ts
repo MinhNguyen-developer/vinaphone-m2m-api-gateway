@@ -1,4 +1,4 @@
-import { IsOptional, IsInt, IsString, Min, Max } from 'class-validator';
+import { IsOptional, IsInt, IsString, IsUUID, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -52,4 +52,9 @@ export class QueryMasterSimDto {
   @IsOptional()
   @IsString()
   sort?: string;
+
+  @ApiPropertyOptional({ description: 'Lọc theo nhóm thiết bị (UUID)' })
+  @IsOptional()
+  @IsUUID('4')
+  groupId?: string;
 }

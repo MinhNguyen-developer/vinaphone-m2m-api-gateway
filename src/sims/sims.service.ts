@@ -16,6 +16,7 @@ import {
   SimStatusAction,
   BatchUpdateSimStatusDto,
   BulkCancelSimsByPhoneDto,
+  BulkResetSimsByPhoneDto,
 } from './dto/update-sim-status.dto';
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
@@ -77,12 +78,27 @@ export class SimsService {
         'firstUsedAt',
         'sogIsOwner',
         'status',
+        'note',
       ]);
+
+    // Sort by simGroups count is a relation sort — handled separately
+    const sortSegment = sort?.split(':');
+    const simGroupsOrder =
+      sortSegment?.[0] === 'simGroups' &&
+      ['asc', 'desc'].includes(sortSegment?.[1])
+        ? (sortSegment[1] as 'asc' | 'desc')
+        : null;
+    const effectiveOrderBy: Prisma.SimOrderByWithRelationInput[] =
+      simGroupsOrder
+        ? [{ simGroups: { _count: simGroupsOrder } }]
+        : orderBy.length
+          ? orderBy
+          : [{ phoneNumber: 'asc' }];
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.sim.findMany({
         where,
-        orderBy: orderBy.length ? orderBy : [{ phoneNumber: 'asc' }],
+        orderBy: effectiveOrderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
@@ -170,11 +186,25 @@ export class SimsService {
       select: {
         id: true,
         phoneNumber: true,
+        imsi: true,
+        contractCode: true,
+        groupName: true,
         ratingPlanName: true,
         productCode: true,
-        status: true,
+        sogIsOwner: true,
+        sogGroupId: true,
+        sogGroupName: true,
         usedMB: true,
         firstUsedAt: true,
+        note: true,
+        status: true,
+        simGroups: {
+          select: {
+            group: {
+              select: { id: true, name: true },
+            },
+          },
+        },
       },
       orderBy: { phoneNumber: 'asc' },
     });
@@ -234,14 +264,24 @@ export class SimsService {
       });
     }
 
-    return this.prisma.sim.update({
-      where: { id },
-      data: {
-        status: SimStatus.NEW,
-        usedMB: 0,
-        firstUsedAt: null,
-        confirmedAt: null,
-      },
+    // Reset về trạng thái NEW và xóa lịch sử dữ liệu
+    return this.prisma.$transaction(async (tx) => {
+      await tx.usageHistory.deleteMany({ where: { simId: id } });
+      await tx.monthlyDataUsage.deleteMany({
+        where: { msisdn: sim.phoneNumber },
+      });
+      await tx.simGroup.deleteMany({ where: { simId: id } });
+      return tx.sim.update({
+        where: { id },
+        data: {
+          status: SimStatus.NEW,
+          usedMB: 0,
+          firstUsedAt: null,
+          confirmedAt: null,
+          note: null,
+          resetDate: new Date(),
+        },
+      });
     });
   }
 
@@ -273,14 +313,35 @@ export class SimsService {
     }
 
     // Reset về trạng thái NEW
-    return this.prisma.sim.updateMany({
+    const simsToReset = await this.prisma.sim.findMany({
       where: { id: { in: ids } },
-      data: {
-        status: SimStatus.NEW,
-        usedMB: 0,
-        firstUsedAt: null,
-        confirmedAt: null,
-      },
+      select: { id: true, phoneNumber: true },
+    });
+
+    if (simsToReset.length === 0) {
+      return { count: 0 };
+    }
+
+    const resetIds = simsToReset.map((s) => s.id);
+    const resetPhones = simsToReset.map((s) => s.phoneNumber);
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.simGroup.deleteMany({ where: { simId: { in: resetIds } } });
+      await tx.usageHistory.deleteMany({ where: { simId: { in: resetIds } } });
+      await tx.monthlyDataUsage.deleteMany({
+        where: { msisdn: { in: resetPhones } },
+      });
+      return tx.sim.updateMany({
+        where: { id: { in: resetIds } },
+        data: {
+          status: SimStatus.NEW,
+          usedMB: 0,
+          firstUsedAt: null,
+          confirmedAt: null,
+          note: null,
+          resetDate: new Date(),
+        },
+      });
     });
   }
 
@@ -304,6 +365,57 @@ export class SimsService {
       cancelled: result.count,
       requested: normalised.length,
       notFound: normalised.length - result.count,
+    };
+  }
+
+  async bulkResetSims(dto: BulkResetSimsByPhoneDto) {
+    const { phoneNumbers } = dto;
+
+    const normalised = phoneNumbers
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    if (normalised.length === 0) {
+      throw new BadRequestException('Danh sách số điện thoại không được rỗng');
+    }
+
+    const found = await this.prisma.sim.findMany({
+      where: { phoneNumber: { in: normalised } },
+      select: { id: true, phoneNumber: true },
+    });
+
+    if (found.length > 0) {
+      const foundIds = found.map((s) => s.id);
+      const foundPhones = found.map((s) => s.phoneNumber);
+
+      await this.prisma.$transaction([
+        this.prisma.simGroup.deleteMany({
+          where: { simId: { in: foundIds } },
+        }),
+        this.prisma.usageHistory.deleteMany({
+          where: { simId: { in: foundIds } },
+        }),
+        this.prisma.monthlyDataUsage.deleteMany({
+          where: { msisdn: { in: foundPhones } },
+        }),
+        this.prisma.sim.updateMany({
+          where: { id: { in: foundIds } },
+          data: {
+            status: SimStatus.NEW,
+            usedMB: 0,
+            firstUsedAt: null,
+            confirmedAt: null,
+            note: null,
+            resetDate: new Date(),
+          },
+        }),
+      ]);
+    }
+
+    return {
+      reset: found.length,
+      requested: normalised.length,
+      notFound: normalised.length - found.length,
     };
   }
 

@@ -33,3 +33,13 @@ export class BulkCancelSimsByPhoneDto {
   @IsString({ each: true })
   phoneNumbers!: string[];
 }
+
+export class BulkResetSimsByPhoneDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Danh sách số điện thoại cần reset',
+  })
+  @IsArray()
+  @IsString({ each: true })
+  phoneNumbers!: string[];
+}

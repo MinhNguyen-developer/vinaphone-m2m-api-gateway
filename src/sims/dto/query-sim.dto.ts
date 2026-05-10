@@ -140,6 +140,15 @@ export class QuerySimDto {
   sogIsOwner?: Number;
 
   @ApiPropertyOptional({
+    description: 'Tìm sim thành viên hoặc chủ nhóm gói cước (SOG)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
+  @IsArray()
+  @IsString({ each: true })
+  populates?: string[];
+
+  @ApiPropertyOptional({
     description:
       'Sort by one or more fields. Format: "field:asc" or comma-separated "field:asc,field2:desc". ' +
       'Allowed fields: phoneNumber, imsi, status, simType, usedMB, activatedDate, createdAt.',
