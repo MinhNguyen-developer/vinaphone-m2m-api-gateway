@@ -5,6 +5,8 @@ import { UpdateAlertCheckDto } from './dto/update-alert-check.dto';
 import { CreateAlertDto } from './dto/create-alert.dto';
 import { UpdateAlertDto } from './dto/update-alert.dto';
 import { QueryAlertDto } from './dto/query-alert.dto';
+import { QueryTriggeredDto } from './dto/query-triggered.dto';
+import { BulkCheckDto } from './dto/bulk-check.dto';
 
 @Injectable()
 export class AlertsService {
@@ -101,16 +103,15 @@ export class AlertsService {
     await this.prisma.alertConfig.delete({ where: { id } });
   }
 
-  async findTriggered(ratingPlanId?: number) {
+  async findTriggered(dto: QueryTriggeredDto = {}) {
     const activeAlerts = await this.prisma.alertConfig.findMany({
-      where: {
-        active: true,
-        ...(ratingPlanId && { ratingPlanId }),
-      },
+      where: { active: true },
     });
 
     const results: Array<{
-      sim: Sim;
+      sim: Sim & {
+        simGroups: Array<{ group: { id: string; name: string } | null }>;
+      };
       alert: { id: string; label: string; thresholdMB: number };
       checked: boolean;
     }> = [];
@@ -124,24 +125,134 @@ export class AlertsService {
         }),
         ...(alert.productCode && { productCode: alert.productCode }),
         ...(alert.ratingPlanId && { ratingPlanId: alert.ratingPlanId }),
+        // Apply groupId filter from query
+        ...(dto.groupId && {
+          simGroups: { some: { groupId: dto.groupId } },
+        }),
       };
 
-      const sims = await this.prisma.sim.findMany({ where: simWhere });
+      const sims = await this.prisma.sim.findMany({
+        where: simWhere,
+        include: {
+          simGroups: {
+            include: { group: true },
+          },
+        },
+      });
 
       for (const sim of sims) {
         const check = await this.prisma.alertCheck.findUnique({
           where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
         });
 
+        // Only return unchecked items
+        if (check?.checked) continue;
+
         results.push({
           sim,
           alert,
-          checked: check?.checked ?? false,
+          checked: false,
         });
       }
     }
 
+    // Server-side sort by usedMB
+    if (dto.sort) {
+      const [field, dir] = dto.sort.split(':');
+      if (field === 'usedMB') {
+        results.sort((a, b) =>
+          dir === 'asc'
+            ? a.sim.usedMB - b.sim.usedMB
+            : b.sim.usedMB - a.sim.usedMB,
+        );
+      }
+    }
+
     return { data: results, total: results.length };
+  }
+
+  async bulkCheckAlerts(dto: BulkCheckDto, username: string) {
+    const { phoneNumbers } = dto;
+    const normalised = phoneNumbers.map((p) => p.trim()).filter(Boolean);
+
+    const sims = await this.prisma.sim.findMany({
+      where: { phoneNumber: { in: normalised } },
+      include: {
+        simGroups: { include: { group: true } },
+      },
+    });
+
+    const activeAlerts = await this.prisma.alertConfig.findMany({
+      where: { active: true },
+    });
+
+    type CheckedResult = {
+      phoneNumber: string;
+      usedMB: number;
+      alertLabel: string;
+      thresholdMB: number;
+      groupNames: string[];
+    };
+    const checkedResults: CheckedResult[] = [];
+
+    for (const sim of sims) {
+      const groupNames = sim.simGroups
+        .map((sg) => sg.group?.name)
+        .filter(Boolean) as string[];
+
+      for (const alert of activeAlerts) {
+        if (sim.usedMB < alert.thresholdMB) continue;
+
+        // Check scope: alert must apply to this SIM
+        const scopeMatch =
+          (!alert.simId &&
+            !alert.groupId &&
+            !alert.productCode &&
+            !alert.ratingPlanId) ||
+          (alert.simId && alert.simId === sim.id) ||
+          (alert.groupId &&
+            sim.simGroups.some((sg) => sg.groupId === alert.groupId)) ||
+          (alert.productCode && alert.productCode === sim.productCode) ||
+          (alert.ratingPlanId && alert.ratingPlanId === sim.ratingPlanId);
+
+        if (!scopeMatch) continue;
+
+        await this.prisma.alertCheck.upsert({
+          where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
+          update: {
+            checked: true,
+            checkedAt: new Date(),
+            checkedBy: username,
+          },
+          create: {
+            simId: sim.id,
+            alertId: alert.id,
+            checked: true,
+            checkedAt: new Date(),
+            checkedBy: username,
+          },
+        });
+
+        checkedResults.push({
+          phoneNumber: sim.phoneNumber,
+          usedMB: sim.usedMB,
+          alertLabel: alert.label,
+          thresholdMB: alert.thresholdMB,
+          groupNames,
+        });
+      }
+    }
+
+    const notFound = normalised.filter(
+      (p) => !sims.some((s) => s.phoneNumber === p),
+    );
+
+    return {
+      checked: checkedResults.length,
+      notFound: notFound.length,
+      notFoundPhones: notFound,
+      results: checkedResults,
+    };
   }
 
   async updateCheck(

@@ -19,6 +19,7 @@ export class MasterSimsService {
       contractCode,
       ratingPlanId,
       sort,
+      groupId,
     } = params;
 
     const where: Prisma.SimWhereInput = {
@@ -29,6 +30,7 @@ export class MasterSimsService {
       ...(contractCode && {
         contractCode: { contains: contractCode, mode: 'insensitive' },
       }),
+      ...(groupId && { simGroups: { some: { groupId } } }),
       ...(search && {
         OR: [
           { phoneNumber: { contains: search, mode: 'insensitive' } },
@@ -54,6 +56,7 @@ export class MasterSimsService {
         take: pageSize,
         include: {
           monthlyDataUsages: true,
+          simGroups: { include: { group: true } },
         },
       }),
       this.prisma.sim.count({ where }),

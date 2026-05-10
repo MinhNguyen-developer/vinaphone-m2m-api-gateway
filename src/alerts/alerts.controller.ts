@@ -23,6 +23,8 @@ import { UpdateAlertCheckDto } from './dto/update-alert-check.dto';
 import { CreateAlertDto } from './dto/create-alert.dto';
 import { UpdateAlertDto } from './dto/update-alert.dto';
 import { QueryAlertDto } from './dto/query-alert.dto';
+import { QueryTriggeredDto } from './dto/query-triggered.dto';
+import { BulkCheckDto } from './dto/bulk-check.dto';
 
 @ApiTags('alerts')
 @ApiBearerAuth()
@@ -65,10 +67,22 @@ export class AlertsController {
   }
 
   @Get('triggered')
-  @ApiOperation({ summary: 'Danh sách SIM đang vượt ngưỡng cảnh báo' })
-  @ApiQuery({ name: 'ratingPlanId', required: false })
-  findTriggered(@Query('ratingPlanId') ratingPlanId?: number) {
-    return this.alertsService.findTriggered(ratingPlanId);
+  @ApiOperation({
+    summary: 'Danh sách SIM đang vượt ngưỡng cảnh báo (chưa kiểm tra)',
+  })
+  findTriggered(@Query() dto: QueryTriggeredDto) {
+    return this.alertsService.findTriggered(dto);
+  }
+
+  @Post('triggered/bulk-check')
+  @ApiOperation({
+    summary: 'Đánh dấu hàng loạt SIM đã kiểm tra theo số điện thoại',
+  })
+  bulkCheckAlerts(
+    @Body() dto: BulkCheckDto,
+    @Request() req: { user: { username: string } },
+  ) {
+    return this.alertsService.bulkCheckAlerts(dto, req.user.username);
   }
 
   @Patch('triggered/:simId/:alertId/check')

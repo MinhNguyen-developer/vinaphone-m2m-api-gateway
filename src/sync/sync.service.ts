@@ -363,15 +363,16 @@ export class SyncService implements OnModuleInit {
           ratingPlanName,
           groupName, // newly added field from quickSearch response (not in original sims-mgmt API)
           contractDate,
+          vinaphoneActivatedAt: vSim.activatedDate
+            ? new Date(vSim.activatedDate)
+            : null,
         };
 
         // Auto-transition: NEW → ACTIVE when usedMB first > 0
         const currentStatus = existing?.status ?? SimStatus.NEW;
         if (currentStatus === SimStatus.NEW && newUsedMB > 0) {
           sharedData['status'] = SimStatus.ACTIVE;
-          sharedData['firstUsedAt'] = vSim.activatedDate
-            ? new Date(vSim.activatedDate)
-            : now;
+          sharedData['firstUsedAt'] = now;
           if (existing) {
             this.logger.log(`SIM ${msisdnStr} chuyển sang ACTIVE (2)`);
           }
