@@ -42,6 +42,13 @@ export class CreateAlertDto {
   @IsInt()
   ratingPlanId?: number;
 
+  @ApiPropertyOptional({
+    description: 'Mã SIM (nếu áp dụng cho nhóm mã SIM)',
+  })
+  @IsOptional()
+  @IsString()
+  simCodeLabel?: string;
+
   @ApiPropertyOptional({ description: 'Kích hoạt cảnh báo', default: true })
   @IsOptional()
   @IsBoolean()

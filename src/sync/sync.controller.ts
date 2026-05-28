@@ -83,4 +83,20 @@ export class SyncController {
       timestamp: new Date().toISOString(),
     };
   }
+
+  /** Trigger monthly usage sync via detail-plan API (fire-and-forget). */
+  @ApiOperation({
+    summary:
+      'Trigger monthly usage sync (detail-plan). Rate-limited — run manually.',
+  })
+  @Post('monthly-usage')
+  @HttpCode(HttpStatus.OK)
+  triggerMonthlyUsage() {
+    void this.syncService.syncMonthlyUsage();
+    return {
+      triggered: true,
+      job: 'syncMonthlyUsage',
+      timestamp: new Date().toISOString(),
+    };
+  }
 }

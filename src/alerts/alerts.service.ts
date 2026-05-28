@@ -39,6 +39,7 @@ export class AlertsService {
         simId: a.simId,
         productCode: a.productCode,
         ratingPlanId: a.ratingPlanId,
+        simCodeLabel: a.simCodeLabel,
         active: a.active,
       })),
       total,
@@ -66,6 +67,7 @@ export class AlertsService {
         groupId: dto.groupId ?? null,
         ratingPlanId: dto.ratingPlanId ?? null,
         productCode: dto.productCode ?? null,
+        simCodeLabel: dto.simCodeLabel ?? null,
         active: dto.active ?? true,
       },
     });
@@ -88,6 +90,9 @@ export class AlertsService {
         ...(dto.productCode !== undefined && { productCode: dto.productCode }),
         ...(dto.ratingPlanId !== undefined && {
           ratingPlanId: dto.ratingPlanId,
+        }),
+        ...(dto.simCodeLabel !== undefined && {
+          simCodeLabel: dto.simCodeLabel,
         }),
         ...(dto.active !== undefined && { active: dto.active }),
       },
@@ -125,10 +130,12 @@ export class AlertsService {
         }),
         ...(alert.productCode && { productCode: alert.productCode }),
         ...(alert.ratingPlanId && { ratingPlanId: alert.ratingPlanId }),
-        // Apply groupId filter from query
+        ...(alert.simCodeLabel && { simCodeLabel: alert.simCodeLabel }),
+        // Apply filters from query
         ...(dto.groupId && {
           simGroups: { some: { groupId: dto.groupId } },
         }),
+        ...(dto.simCodeLabel && { simCodeLabel: dto.simCodeLabel }),
       };
 
       const sims = await this.prisma.sim.findMany({
@@ -137,6 +144,7 @@ export class AlertsService {
           simGroups: {
             include: { group: true },
           },
+          simCode: { select: { id: true, code: true } },
         },
       });
 

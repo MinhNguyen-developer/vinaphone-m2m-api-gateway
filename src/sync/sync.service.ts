@@ -1,6 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { SchedulerRegistry, CronExpression } from '@nestjs/schedule';
-import { CronJob } from 'cron';
+import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -15,9 +13,8 @@ import type {
   VinaphoneApiBaseResponse,
   RatingPlanItem,
   GroupSimItem,
-  VinaphoneCustomersItem,
-  VinaphoneContractItem,
   UsedDataItem,
+  VinaphoneDetailPlanResponse,
   VinaphoneMonthlyDataUsageItem,
 } from './vinaphone-api.types';
 
@@ -62,7 +59,7 @@ function normalizeMsisdn(msisdn: number | string): string {
 }
 
 @Injectable()
-export class SyncService implements OnModuleInit {
+export class SyncService {
   private readonly logger = new Logger(SyncService.name);
 
   private cachedToken: string | null = null;
@@ -73,41 +70,7 @@ export class SyncService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
-    private readonly schedulerRegistry: SchedulerRegistry,
   ) {}
-
-  onModuleInit() {
-    const cronExpression =
-      this.configService.get<string>('syncCron') ?? CronExpression.EVERY_MINUTE;
-    const syncSimJob = new CronJob(cronExpression, () => void this.syncSims());
-    const syncGroupSimsJob = new CronJob(
-      cronExpression,
-      () => void this.syncGroupSims(),
-    );
-    const syncRatingPlansJob = new CronJob(
-      cronExpression,
-      () => void this.syncRatingPlans(),
-    );
-    const syncCustomersJob = new CronJob(
-      cronExpression,
-      () => void this.syncCustomers(),
-    );
-    const syncContractsJob = new CronJob(
-      cronExpression,
-      () => void this.syncContracts(),
-    );
-    this.schedulerRegistry.addCronJob('syncSims', syncSimJob);
-    this.schedulerRegistry.addCronJob('syncRatingPlans', syncRatingPlansJob);
-    this.schedulerRegistry.addCronJob('syncGroupSims', syncGroupSimsJob);
-    this.schedulerRegistry.addCronJob('syncCustomers', syncCustomersJob);
-    this.schedulerRegistry.addCronJob('syncContracts', syncContractsJob);
-    this.logger.log(`Sync cron scheduled: ${cronExpression}`);
-    // Start immediately on app launch
-    syncSimJob.start();
-    syncRatingPlansJob.start();
-    syncGroupSimsJob.start();
-    syncCustomersJob.start();
-  }
 
   // ─── Token management ──────────────────────────────────────────────────────
 
@@ -279,38 +242,6 @@ export class SyncService implements OnModuleInit {
         `Fetched usage data for ${usedDataMap.size} SIMs in ${Math.ceil(allVinaSims.length / USAGE_BATCH_SIZE)} batch(es)`,
       );
 
-      // ── Fetch monthly data usage for MonthlyDataUsage table ──────────────
-      const MONTHLY_BATCH_SIZE = 20;
-      const allMsisdns = allVinaSims.map((s) => s.msisdn);
-      const monthlyDataItems: Array<{
-        msisdn: string;
-        item: VinaphoneMonthlyDataUsageItem;
-      }> = [];
-      for (let i = 0; i < allMsisdns.length; i += MONTHLY_BATCH_SIZE) {
-        const chunk = allMsisdns.slice(i, i + MONTHLY_BATCH_SIZE);
-        const batchNum = Math.floor(i / MONTHLY_BATCH_SIZE) + 1;
-        try {
-          const rawMonthly = await this.fetchMonthlyDataUsage(
-            chunk,
-            dataTimeout,
-          );
-          for (const item of rawMonthly) {
-            monthlyDataItems.push({
-              msisdn: String(item.msisdn),
-              item,
-            });
-          }
-        } catch (err) {
-          this.logger.warn(
-            `fetchMonthlyDataUsage batch ${batchNum} failed — skipping`,
-            err,
-          );
-        }
-      }
-      this.logger.log(
-        `Fetched monthly data usage for ${monthlyDataItems.length} SIMs in ${Math.ceil(allMsisdns.length / MONTHLY_BATCH_SIZE)} batch(es)`,
-      );
-
       for (const vSim of allVinaSims) {
         const {
           customerName,
@@ -343,6 +274,7 @@ export class SyncService implements OnModuleInit {
         const sogGroupName = sog?.ten_goi ?? null;
         const sogMaGoi = sog?.ma_goi ?? null;
         const sogIsOwner = sog ? sog.msisdn_chu_nhom === null : null;
+        const sogMaster = sog ? sog.msisdn_chu_nhom?.toString() : null;
 
         const sharedData: Record<string, unknown> = {
           usedMB: newUsedMB,
@@ -354,6 +286,7 @@ export class SyncService implements OnModuleInit {
           sogGroupName,
           sogMaGoi,
           sogIsOwner,
+          sogMaster,
           customerName,
           customerCode,
           contractInfo,
@@ -462,43 +395,6 @@ export class SyncService implements OnModuleInit {
         );
       }
 
-      // Upsert MonthlyDataUsage in batches
-      for (let i = 0; i < monthlyDataItems.length; i += 50) {
-        const batch = monthlyDataItems.slice(i, i + 50);
-        await this.prisma.$transaction(
-          batch.map(({ msisdn, item }) =>
-            this.prisma.monthlyDataUsage.upsert({
-              where: { msisdn_month: { msisdn, month: currentMonth } },
-              update: {
-                dataUsedMB: item.dataUsed,
-                smsNoiMangUsed: item.smsNoiMangUsed,
-                smsNgoaiMangUsed: item.smsNgoaiMangUsed,
-                smsQuocTeUsed: item.smsQuocTeUsed,
-                totalData: item.totalData,
-                totalSmsNoiMang: item.totalSmsNoiMang,
-                totalSmsNgoaiMang: item.totalSmsNgoaiMang,
-                totalSmsQuocTe: item.totalSmsQuocTe,
-              },
-              create: {
-                msisdn,
-                month: currentMonth,
-                dataUsedMB: item.dataUsed,
-                smsNoiMangUsed: item.smsNoiMangUsed,
-                smsNgoaiMangUsed: item.smsNgoaiMangUsed,
-                smsQuocTeUsed: item.smsQuocTeUsed,
-                totalData: item.totalData,
-                totalSmsNoiMang: item.totalSmsNoiMang,
-                totalSmsNgoaiMang: item.totalSmsNgoaiMang,
-                totalSmsQuocTe: item.totalSmsQuocTe,
-              },
-            }),
-          ),
-        );
-      }
-      this.logger.log(
-        `Upserted MonthlyDataUsage for ${monthlyDataItems.length} SIMs`,
-      );
-
       await this.recalculateMasterSimUsage();
       this.logger.log(
         `Sync completed: ${processed}/${allVinaSims.length} SIMs processed.`,
@@ -508,6 +404,96 @@ export class SyncService implements OnModuleInit {
     } finally {
       this.isSyncing = false;
     }
+  }
+
+  // ─── Sync monthly usage (user-triggered) ───────────────────────────────────
+
+  /**
+   * Fetch detail-plan for all SIMs and upsert MonthlyDataUsage.
+   * This is meant to be triggered manually by the user (not via cron)
+   * because the Vinaphone API has rate limits (~5000 calls/day).
+   */
+  async syncMonthlyUsage(): Promise<{
+    success: number;
+    failed: number;
+    total: number;
+  }> {
+    this.logger.log('Starting monthly usage sync (detail-plan)...');
+    const dataTimeout =
+      this.configService.get<number>('vinaphone.dataTimeoutMs') ?? 120_000;
+    const currentMonth = dayjs().format('YYYY-MM');
+
+    // Get master SIM phone numbers
+    const masterSims = await this.prisma.sim.findMany({
+      select: { phoneNumber: true },
+      where: { sogIsOwner: true },
+    });
+
+    const normalSims = await this.prisma.sim.findMany({
+      select: { phoneNumber: true },
+      where: { OR: [{ sogIsOwner: false }, { sogIsOwner: null }] },
+    });
+
+    const normalMsisdns = normalSims.map((s) => Number(s.phoneNumber));
+    const masterMsisdns = masterSims.map((s) => Number(s.phoneNumber));
+
+    this.logger.log(
+      `Monthly usage sync: ${normalMsisdns.length} normal SIMs, ${masterMsisdns.length} master SIMs`,
+    );
+
+    // Fetch detail-plan for normal SIMs
+    const detailPlanMap = await this.fetchAllDetailPlans(
+      normalMsisdns,
+      dataTimeout,
+    );
+    this.logger.log(
+      `Fetched detail-plan for ${detailPlanMap.size}/${normalMsisdns.length} normal SIMs`,
+    );
+
+    // Fetch searchSanLuongThueBao for master SIMs
+    const masterUsageMap = await this.fetchMasterSimUsage(
+      masterMsisdns,
+      dataTimeout,
+    );
+    this.logger.log(
+      `Fetched searchSanLuongThueBao for ${masterUsageMap.size}/${masterMsisdns.length} master SIMs`,
+    );
+
+    // Merge both results
+    const allEntries = new Map<
+      string,
+      { dataUsedMB: number; totalData: number | null }
+    >();
+    for (const [msisdn, data] of detailPlanMap) {
+      allEntries.set(msisdn, data);
+    }
+    for (const [msisdn, data] of masterUsageMap) {
+      allEntries.set(msisdn, data);
+    }
+
+    // Upsert MonthlyDataUsage in batches
+    const monthlyEntries = Array.from(allEntries.entries());
+    for (let i = 0; i < monthlyEntries.length; i += 50) {
+      const batch = monthlyEntries.slice(i, i + 50);
+      await this.prisma.$transaction(
+        batch.map(([msisdn, { dataUsedMB, totalData }]) =>
+          this.prisma.monthlyDataUsage.upsert({
+            where: { msisdn_month: { msisdn, month: currentMonth } },
+            update: { dataUsedMB, totalData },
+            create: { msisdn, month: currentMonth, dataUsedMB, totalData },
+          }),
+        ),
+      );
+    }
+    this.logger.log(
+      `Upserted MonthlyDataUsage for ${monthlyEntries.length} SIMs`,
+    );
+
+    return {
+      success: allEntries.size,
+      failed: normalMsisdns.length + masterMsisdns.length - allEntries.size,
+      total: normalMsisdns.length + masterMsisdns.length,
+    };
   }
 
   // ─── Sync rating plans ─────────────────────────────────────────────────────
@@ -777,119 +763,6 @@ export class SyncService implements OnModuleInit {
   }
 
   /**
-   * Sync customers from Vinaphone API and upsert into local DB.
-   */
-  private async syncCustomers() {
-    this.logger.log('Starting customer sync from Vinaphone API...');
-    try {
-      const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
-      const timeout =
-        this.configService.get<number>('vinaphone.timeoutMs') ?? 10_000;
-      const token = await this.getToken();
-      const headers = this.authHeaders(token);
-
-      const pageSize = 1000;
-      let page = 0;
-
-      const { data } = await this.withRetry('fetch customers', () =>
-        firstValueFrom(
-          this.httpService.get<
-            VinaphoneApiBaseResponse<VinaphoneCustomersItem>
-          >(`${baseUrl}/sim-mgmt/dropdown`, {
-            headers,
-            timeout,
-            params: {
-              page,
-              size: pageSize,
-              type: 'customer',
-              sort: 'name,asc',
-            },
-          }),
-        ),
-      );
-
-      for (const cust of data.content) {
-        await this.prisma.customer.upsert({
-          where: { customerCode: cust.customerCode },
-          update: {
-            customerName: cust.customerName,
-            syncedAt: new Date(),
-          },
-          create: {
-            customerCode: cust.customerCode,
-            customerName: cust.customerName,
-            syncedAt: new Date(),
-          },
-        });
-      }
-
-      this.logger.log(
-        `Customer sync completed: ${data.content.length} customers processed.`,
-      );
-    } catch (err) {
-      this.logger.error('Customer sync failed', (err as Error).stack);
-    }
-  }
-
-  /**
-   * Sync contracts from Vinaphone API and upsert into local DB.
-   */
-  private async syncContracts() {
-    this.logger.log('Starting contract sync from Vinaphone API...');
-    try {
-      const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
-      const timeout =
-        this.configService.get<number>('vinaphone.timeoutMs') ?? 10_000;
-      const token = await this.getToken();
-      const headers = this.authHeaders(token);
-
-      const pageSize = 1000;
-      let page = 0;
-
-      const { data } = await this.withRetry('fetch contracts', () =>
-        firstValueFrom(
-          this.httpService.get<VinaphoneApiBaseResponse<VinaphoneContractItem>>(
-            `${baseUrl}/contract/search`,
-            {
-              headers,
-              timeout,
-              params: {
-                page,
-                size: pageSize,
-              },
-            },
-          ),
-        ),
-      );
-
-      for (const contract of data.content) {
-        const { id, contractDate, ...restContract } = contract;
-        await this.prisma.contract.upsert({
-          where: { contractCode: contract.contractCode },
-          update: {
-            ...restContract,
-            contractId: id,
-            contractDate: contractDate ? new Date(contractDate) : null,
-            syncedAt: new Date(),
-          },
-          create: {
-            ...restContract,
-            contractId: id,
-            contractDate: contractDate ? new Date(contractDate) : null,
-            syncedAt: new Date(),
-          },
-        });
-      }
-
-      this.logger.log(
-        `Contract sync completed: ${data.content.length} contracts processed.`,
-      );
-    } catch (err) {
-      this.logger.error('Contract sync failed', (err as Error).stack);
-    }
-  }
-
-  /**
    * Fetch the sog field for a single SIM via GET /sim-mgmt/<msisdn>.
    * Used as a fallback when quickSearch returns sog=null.
    */
@@ -919,31 +792,195 @@ export class SyncService implements OnModuleInit {
   }
 
   /**
-   * Get monthly data usage for all SIMs
+   * Fetch detail-plan for a single SIM to get dataUseInMonth.
+   * Returns null on failure (graceful degradation).
    */
-  private async fetchMonthlyDataUsage(msisdns: number[], timeout?: number) {
+  private async fetchSimDetailPlan(
+    msisdn: string,
+    timeout: number,
+  ): Promise<VinaphoneDetailPlanResponse | null> {
     const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
-    const effectiveTimeout =
-      timeout ??
-      this.configService.get<number>('vinaphone.dataTimeoutMs') ??
-      120_000;
+    const token = await this.getToken();
+    const headers = this.authHeaders(token);
+    try {
+      const { data } = await this.withRetry(
+        `detail-plan ${msisdn}`,
+        () =>
+          firstValueFrom(
+            this.httpService.get<VinaphoneDetailPlanResponse>(
+              `${baseUrl}/sim-mgmt/detail-plan/${msisdn}`,
+              { headers, timeout },
+            ),
+          ),
+        2,
+      );
+      return data;
+    } catch {
+      this.logger.warn(`detail-plan ${msisdn} failed — skipping`);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch detail-plan for all SIMs concurrently with controlled parallelism.
+   * Uses Promise.allSettled so individual failures don't crash the batch.
+   * Includes 5s delay between batches and circuit breaker (10 consecutive failures).
+   */
+  private async fetchAllDetailPlans(
+    msisdns: number[],
+    timeout: number,
+    concurrency = 10,
+  ): Promise<Map<string, { dataUsedMB: number; totalData: number | null }>> {
+    const results = new Map<
+      string,
+      { dataUsedMB: number; totalData: number | null }
+    >();
+    const total = msisdns.length;
+    let successCount = 0;
+    let failCount = 0;
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 10;
+    const BATCH_DELAY_MS = 5_000;
+
+    for (let i = 0; i < msisdns.length; i += concurrency) {
+      // Circuit breaker: stop if too many consecutive failures
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        this.logger.error(
+          `detail-plan circuit breaker triggered: ${MAX_CONSECUTIVE_FAILURES} consecutive failures. ` +
+            `Stopping early at ${i}/${total}. Success so far: ${successCount}`,
+        );
+        break;
+      }
+
+      const batch = msisdns.slice(i, i + concurrency);
+      const settled = await Promise.allSettled(
+        batch.map((msisdn) => this.fetchSimDetailPlan(String(msisdn), timeout)),
+      );
+
+      let batchHasSuccess = false;
+      for (let j = 0; j < batch.length; j++) {
+        const result = settled[j];
+        if (result.status === 'fulfilled' && result.value) {
+          const bytes = result.value.dataUseInMonth ?? 0;
+          results.set(String(batch[j]), {
+            dataUsedMB: Math.round(bytes / (1024 * 1024)),
+            totalData: result.value.limitDataUsage ?? null,
+          });
+          successCount++;
+          batchHasSuccess = true;
+        } else {
+          failCount++;
+        }
+      }
+
+      // Track consecutive failures at batch level
+      if (batchHasSuccess) {
+        consecutiveFailures = 0;
+      } else {
+        consecutiveFailures++;
+      }
+
+      const processed = Math.min(i + concurrency, total);
+      if (processed % 50 === 0 || processed === total) {
+        this.logger.log(
+          `detail-plan progress: ${processed}/${total} (success: ${successCount}, failed: ${failCount})`,
+        );
+      }
+
+      // Delay between batches to avoid rate limiting
+      if (i + concurrency < msisdns.length) {
+        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
+      }
+    }
+
+    if (failCount > 0) {
+      this.logger.warn(
+        `detail-plan completed with ${failCount} failures out of ${total} SIMs`,
+      );
+    }
+
+    return results;
+  }
+
+  /**
+   * Fetch usage data for master SIMs via POST /sim-mgmt/searchSanLuongThueBao.
+   * This API accepts an array of msisdns (in 84xxx format) and returns usage in MB.
+   * Batches requests to avoid overloading the API.
+   */
+  private async fetchMasterSimUsage(
+    msisdns: number[],
+    timeout: number,
+    batchSize = 50,
+  ): Promise<Map<string, { dataUsedMB: number; totalData: number | null }>> {
+    const results = new Map<
+      string,
+      { dataUsedMB: number; totalData: number | null }
+    >();
+    if (msisdns.length === 0) return results;
+
+    const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
     const token = await this.getToken();
     const headers = this.authHeaders(token);
 
-    const allUsage = await this.withRetry('fetch monthly data usage', () =>
-      firstValueFrom(
-        this.httpService.post<VinaphoneMonthlyDataUsageItem[]>(
-          `${baseUrl}/sim-mgmt/searchSanLuongThueBao`,
-          msisdns,
-          {
-            headers,
-            timeout: effectiveTimeout,
-          },
-        ),
-      ),
-    );
+    // Convert local format (0xxx) to API format (84xxx)
+    const toApiFormat = (msisdn: number): number => {
+      const str = String(msisdn);
+      if (str.startsWith('0')) {
+        return Number('84' + str.slice(1));
+      }
+      return msisdn;
+    };
 
-    return allUsage.data;
+    // Build reverse map: apiMsisdn → original DB phone number
+    const reverseMap = new Map<number, string>();
+    for (const msisdn of msisdns) {
+      reverseMap.set(toApiFormat(msisdn), String(msisdn));
+    }
+
+    for (let i = 0; i < msisdns.length; i += batchSize) {
+      const batch = msisdns.slice(i, i + batchSize);
+      const apiMsisdns = batch.map(toApiFormat);
+
+      try {
+        const { data: items } = await this.withRetry(
+          `searchSanLuongThueBao batch ${Math.floor(i / batchSize) + 1}`,
+          () =>
+            firstValueFrom(
+              this.httpService.post<VinaphoneMonthlyDataUsageItem[]>(
+                `${baseUrl}/sim-mgmt/searchSanLuongThueBao`,
+                apiMsisdns,
+                { headers, timeout },
+              ),
+            ),
+        );
+
+        for (const item of items) {
+          // Map API msisdn back to the original DB phone number
+          const dbPhone =
+            reverseMap.get(Number(item.msisdn)) ?? String(item.msisdn);
+          results.set(dbPhone, {
+            dataUsedMB: item.dataUsed ?? 0,
+            totalData: item.totalData ?? null,
+          });
+        }
+
+        this.logger.debug(
+          `searchSanLuongThueBao batch ${Math.floor(i / batchSize) + 1}: fetched ${items.length} records`,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `searchSanLuongThueBao batch ${Math.floor(i / batchSize) + 1} failed`,
+          err,
+        );
+      }
+
+      // Delay between batches
+      if (i + batchSize < msisdns.length) {
+        await new Promise((r) => setTimeout(r, 5_000));
+      }
+    }
+
+    return results;
   }
 
   private async recalculateMasterSimUsage() {

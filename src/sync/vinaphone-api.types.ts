@@ -8,7 +8,7 @@ export interface SogItem {
   phan_loai: number;
   is_roaming: number;
   /** null = SIM này là chủ nhóm; có giá trị = SIM này là thành viên */
-  msisdn_chu_nhom: string | null;
+  msisdn_chu_nhom: number | null;
 }
 
 /** One SIM returned by GET /sim-mgmt/memberOfGr */
@@ -520,4 +520,17 @@ export interface VinaphoneMonthlyDataUsageItem {
   totalSmsNoiMang: number | null;
   totalSmsNgoaiMang: number | null;
   totalSmsQuocTe: number | null;
+}
+
+export interface VinaphoneDetailPlanResponse {
+  planName: string | null;
+  limitDataUsage: number | null;
+  dataUsage: number | null;
+  dataUseInMonth: number | null;
+  overData: number | null;
+  dataUseOnRatingPlan: number | null;
+  dataRemainOnRatingPlan: number | null;
+  smsIntra: number | null;
+  smsInter: number | null;
+  chargesIncurred: number | null;
 }

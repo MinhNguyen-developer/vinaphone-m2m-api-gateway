@@ -140,6 +140,22 @@ export class QuerySimDto {
   sogIsOwner?: Number;
 
   @ApiPropertyOptional({
+    description: 'Tìm theo ngày kích hoạt từ (activatedDate)',
+  })
+  @IsOptional()
+  @Type(() => String)
+  @IsString()
+  activeDateFrom?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tìm theo ngày kích hoạt đến (activatedDate)',
+  })
+  @IsOptional()
+  @Type(() => String)
+  @IsString()
+  activeDateTo?: string;
+
+  @ApiPropertyOptional({
     description: 'Tìm sim thành viên hoặc chủ nhóm gói cước (SOG)',
   })
   @IsOptional()

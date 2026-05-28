@@ -24,6 +24,7 @@ import {
 } from './dto/update-sim-status.dto';
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
+import { PatchSimDto } from './dto/patch-sim.dto';
 import { QueryGroupMembersDto } from './dto/query-group-members.dto';
 
 @ApiTags('sims')
@@ -115,5 +116,12 @@ export class SimsController {
     @Body() dto: UpdateFirstUsedAtDto,
   ) {
     return this.simsService.updateFirstUsedAt(id, dto);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Cập nhật SIM (generic patch)' })
+  @ApiParam({ name: 'id', description: 'UUID của SIM' })
+  patchSim(@Param('id') id: string, @Body() dto: PatchSimDto) {
+    return this.simsService.patchSim(id, dto);
   }
 }
