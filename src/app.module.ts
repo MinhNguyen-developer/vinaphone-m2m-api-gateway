@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { ScheduleModule } from '@nestjs/schedule';
 import { HttpModule } from '@nestjs/axios';
 import configuration from './config/configuration';
 import { PrismaModule } from './prisma/prisma.module';
@@ -16,6 +15,7 @@ import { RatingPlanModule } from './rating-plan/rating-plan.module';
 import { SimGroupModule } from './sim-group/sim-group.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { SimCodesModule } from './sim-codes/sim-codes.module';
 
 @Module({
   imports: [
@@ -24,7 +24,6 @@ import { DashboardModule } from './dashboard/dashboard.module';
       load: [configuration],
     }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
-    ScheduleModule.forRoot(),
     HttpModule,
     PrismaModule,
     AuthModule,
@@ -38,6 +37,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     SimGroupModule,
     ContractsModule,
     DashboardModule,
+    SimCodesModule,
   ],
 })
 export class AppModule {}

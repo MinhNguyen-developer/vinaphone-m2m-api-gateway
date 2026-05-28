@@ -7,6 +7,11 @@ export class QueryTriggeredDto {
   @IsUUID('4')
   groupId?: string;
 
+  @ApiPropertyOptional({ description: 'Lọc theo mã SIM' })
+  @IsOptional()
+  @IsString()
+  simCodeLabel?: string;
+
   @ApiPropertyOptional({
     description: 'Sắp xếp, ví dụ: usedMB:asc | usedMB:desc',
   })

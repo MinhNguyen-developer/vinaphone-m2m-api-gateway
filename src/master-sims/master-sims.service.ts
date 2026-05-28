@@ -48,10 +48,22 @@ export class MasterSimsService {
       'contractCode',
     ]);
 
+    const sortSegment = sort?.split(':');
+    const sortDir =
+      sortSegment?.[1] === 'asc' || sortSegment?.[1] === 'desc'
+        ? (sortSegment[1] as 'asc' | 'desc')
+        : null;
+    const effectiveOrderBy: Prisma.SimOrderByWithRelationInput[] = (() => {
+      if (sortDir && sortSegment?.[0] === 'simGroups') {
+        return [{ simGroups: { _count: sortDir } }];
+      }
+      return orderBy.length ? orderBy : [{ phoneNumber: 'asc' }];
+    })();
+
     const [masterSims, total] = await this.prisma.$transaction([
       this.prisma.sim.findMany({
         where,
-        orderBy: orderBy.length ? orderBy : [{ phoneNumber: 'asc' }],
+        orderBy: effectiveOrderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {

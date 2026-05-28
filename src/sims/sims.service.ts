@@ -44,6 +44,8 @@ export class SimsService {
       simType,
       sort,
       sogIsOwner,
+      activeDateFrom,
+      activeDateTo,
     } = query;
 
     const where: Prisma.SimWhereInput = {
@@ -65,6 +67,13 @@ export class SimsService {
       ...(search && {
         phoneNumber: { contains: search, mode: 'insensitive' },
       }),
+      ...(activeDateFrom &&
+        activeDateTo && {
+          firstUsedAt: {
+            gte: dayjs(activeDateFrom, 'YYYY-MM-DD').startOf('day').toDate(),
+            lte: dayjs(activeDateTo, 'YYYY-MM-DD').endOf('day').toDate(),
+          },
+        }),
     };
 
     const orderBy: Prisma.SimOrderByWithRelationInput[] =
@@ -79,6 +88,8 @@ export class SimsService {
         'sogIsOwner',
         'status',
         'note',
+        'vinaphoneActivatedAt',
+        'sogMaster',
       ]);
 
     // Sort by simGroups count is a relation sort — handled separately
@@ -119,6 +130,7 @@ export class SimsService {
               },
             },
           },
+          simCode: { select: { id: true, code: true } },
         },
       }),
       this.prisma.sim.count({ where }),
@@ -227,6 +239,7 @@ export class SimsService {
         simGroups: {
           select: { group: { select: { id: true, name: true } } },
         },
+        simCode: { select: { id: true, code: true } },
       },
     });
     if (!sim) throw new NotFoundException(`SIM ${id} không tồn tại`);
@@ -437,6 +450,30 @@ export class SimsService {
     });
   }
 
+  /**
+   * Generic patch – updates only the fields present in the DTO.
+   * Designed to be extended: just add new optional fields to PatchSimDto.
+   */
+  async patchSim(id: string, dto: import('./dto/patch-sim.dto').PatchSimDto) {
+    await this.findOne(id);
+
+    const data: Record<string, unknown> = {};
+
+    if ('note' in dto) data.note = dto.note ?? null;
+    if ('usedMB' in dto) data.usedMB = dto.usedMB;
+    if ('status' in dto) data.status = dto.status;
+    if ('simCodeLabel' in dto) data.simCodeLabel = dto.simCodeLabel ?? null;
+    if ('firstUsedAt' in dto) {
+      data.firstUsedAt = dto.firstUsedAt
+        ? dayjs(dto.firstUsedAt, 'YYYY-MM-DD HH:mm').toDate()
+        : null;
+    }
+
+    if (Object.keys(data).length === 0) return this.findOne(id);
+
+    return this.prisma.sim.update({ where: { id }, data });
+  }
+
   async getGroupMembers(groupId: string, query: QueryGroupMembersDto) {
     const { page = 1, pageSize = 50, msisdn, sort } = query;
 
@@ -449,6 +486,10 @@ export class SimsService {
     const orderBy = mapSortStringToOrderInput<Sim>(sort, [
       'usedMB',
       'phoneNumber',
+      'imsi',
+      'note',
+      'simCodeLabel',
+      'status',
     ]) || [{ phoneNumber: 'asc' as const }];
 
     const [data, total] = await this.prisma.$transaction([
@@ -456,10 +497,15 @@ export class SimsService {
         where,
         orderBy,
         select: {
+          id: true,
           phoneNumber: true,
+          imsi: true,
+          note: true,
+          simCodeLabel: true,
           ratingPlanName: true,
           status: true,
           usedMB: true,
+          simCode: { select: { id: true, code: true } },
         },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -511,6 +557,13 @@ export class SimsService {
       monthlyDataUsages: sim.monthlyDataUsages ?? [],
       simGroups: sim.simGroups ?? [],
       alertConfigs: sim.alertConfigs ?? [],
+      vinaphoneActivatedAt: sim.vinaphoneActivatedAt
+        ? dayjs(sim.vinaphoneActivatedAt)
+            .utcOffset('+07:00')
+            .format('YYYY-MM-DD HH:mm')
+        : null,
+      sogMaster: sim.sogMaster,
+      simCode: (sim as any).simCode ?? null,
     };
   }
 }
