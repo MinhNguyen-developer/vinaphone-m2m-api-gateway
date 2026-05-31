@@ -21,6 +21,8 @@ import {
   UpdateSimStatusDto,
   BulkCancelSimsByPhoneDto,
   BulkResetSimsByPhoneDto,
+  BulkLockSimsByPhoneDto,
+  BulkPendingCancelSimsByPhoneDto,
 } from './dto/update-sim-status.dto';
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
@@ -99,6 +101,20 @@ export class SimsController {
   @ApiOperation({ summary: 'Reset hàng loạt SIM theo số điện thoại' })
   bulkResetSims(@Body() dto: BulkResetSimsByPhoneDto) {
     return this.simsService.bulkResetSims(dto);
+  }
+
+  @Post('bulk-lock')
+  @ApiOperation({ summary: 'Tạm khoá hàng loạt SIM theo số điện thoại' })
+  bulkLockSims(@Body() dto: BulkLockSimsByPhoneDto) {
+    return this.simsService.bulkLockSims(dto);
+  }
+
+  @Post('bulk-pending-cancel')
+  @ApiOperation({
+    summary: 'Chuyển trạng thái Chờ huỷ hàng loạt SIM theo số điện thoại',
+  })
+  bulkPendingCancelSims(@Body() dto: BulkPendingCancelSimsByPhoneDto) {
+    return this.simsService.bulkPendingCancelSims(dto);
   }
 
   @Patch(':id/note')

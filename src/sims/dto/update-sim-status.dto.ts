@@ -5,6 +5,8 @@ export enum SimStatusAction {
   CONFIRM = 'confirm',
   RESET = 'reset',
   CANCEL = 'cancel',
+  LOCK = 'lock',
+  PENDING_CANCEL = 'pending_cancel',
 }
 
 export class UpdateSimStatusDto {
@@ -38,6 +40,26 @@ export class BulkResetSimsByPhoneDto {
   @ApiProperty({
     type: [String],
     description: 'Danh sách số điện thoại cần reset',
+  })
+  @IsArray()
+  @IsString({ each: true })
+  phoneNumbers!: string[];
+}
+
+export class BulkLockSimsByPhoneDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Danh sách số điện thoại cần tạm khoá',
+  })
+  @IsArray()
+  @IsString({ each: true })
+  phoneNumbers!: string[];
+}
+
+export class BulkPendingCancelSimsByPhoneDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Danh sách số điện thoại chờ huỷ',
   })
   @IsArray()
   @IsString({ each: true })

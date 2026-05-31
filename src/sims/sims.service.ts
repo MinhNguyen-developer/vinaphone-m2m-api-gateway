@@ -17,6 +17,8 @@ import {
   BatchUpdateSimStatusDto,
   BulkCancelSimsByPhoneDto,
   BulkResetSimsByPhoneDto,
+  BulkLockSimsByPhoneDto,
+  BulkPendingCancelSimsByPhoneDto,
 } from './dto/update-sim-status.dto';
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
@@ -46,6 +48,7 @@ export class SimsService {
       sogIsOwner,
       activeDateFrom,
       activeDateTo,
+      simCode,
     } = query;
 
     const where: Prisma.SimWhereInput = {
@@ -74,6 +77,7 @@ export class SimsService {
             lte: dayjs(activeDateTo, 'YYYY-MM-DD').endOf('day').toDate(),
           },
         }),
+      ...(simCode && { simCode: { id: { equals: simCode } } }),
     };
 
     const orderBy: Prisma.SimOrderByWithRelationInput[] =
@@ -90,6 +94,7 @@ export class SimsService {
         'note',
         'vinaphoneActivatedAt',
         'sogMaster',
+        'simCodeLabel',
       ]);
 
     // Sort by simGroups count is a relation sort — handled separately
@@ -277,6 +282,20 @@ export class SimsService {
       });
     }
 
+    if (dto.action === SimStatusAction.LOCK) {
+      return this.prisma.sim.update({
+        where: { id },
+        data: { status: SimStatus.SUSPENDED },
+      });
+    }
+
+    if (dto.action === SimStatusAction.PENDING_CANCEL) {
+      return this.prisma.sim.update({
+        where: { id },
+        data: { status: SimStatus.PENDING_CANCEL },
+      });
+    }
+
     // Reset về trạng thái NEW và xóa lịch sử dữ liệu
     return this.prisma.$transaction(async (tx) => {
       await tx.usageHistory.deleteMany({ where: { simId: id } });
@@ -432,6 +451,48 @@ export class SimsService {
     };
   }
 
+  async bulkLockSims(dto: BulkLockSimsByPhoneDto) {
+    const normalised = dto.phoneNumbers
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    if (normalised.length === 0) {
+      throw new BadRequestException('Danh sách số điện thoại không được rỗng');
+    }
+
+    const result = await this.prisma.sim.updateMany({
+      where: { phoneNumber: { in: normalised } },
+      data: { status: SimStatus.SUSPENDED },
+    });
+
+    return {
+      locked: result.count,
+      requested: normalised.length,
+      notFound: normalised.length - result.count,
+    };
+  }
+
+  async bulkPendingCancelSims(dto: BulkPendingCancelSimsByPhoneDto) {
+    const normalised = dto.phoneNumbers
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    if (normalised.length === 0) {
+      throw new BadRequestException('Danh sách số điện thoại không được rỗng');
+    }
+
+    const result = await this.prisma.sim.updateMany({
+      where: { phoneNumber: { in: normalised } },
+      data: { status: SimStatus.PENDING_CANCEL },
+    });
+
+    return {
+      pendingCancelled: result.count,
+      requested: normalised.length,
+      notFound: normalised.length - result.count,
+    };
+  }
+
   async updateNote(id: string, dto: UpdateNoteDto) {
     await this.findOne(id);
     return this.prisma.sim.update({
@@ -564,6 +625,7 @@ export class SimsService {
         : null,
       sogMaster: sim.sogMaster,
       simCode: (sim as any).simCode ?? null,
+      simCodeLabel: sim.simCodeLabel ?? null,
     };
   }
 }

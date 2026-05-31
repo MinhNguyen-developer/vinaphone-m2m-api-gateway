@@ -284,7 +284,7 @@ async function main() {
       label: 'Cảnh báo 1GB',
       thresholdMB: 1024,
       productCode: 'vina2400',
-      active: true,
+      status: 1,
     },
   });
 
@@ -293,7 +293,7 @@ async function main() {
       label: 'Cảnh báo 2GB',
       thresholdMB: 2048,
       productCode: 'vina2400',
-      active: true,
+      status: 1,
     },
   });
 
@@ -302,7 +302,7 @@ async function main() {
       label: 'Cảnh báo nhóm doanh nghiệp 4GB',
       thresholdMB: 4096,
       groupId: groupEnterprise.id,
-      active: true,
+      status: 1,
     },
   });
 
@@ -311,11 +311,11 @@ async function main() {
       label: 'Cảnh báo vina4800 3GB (tắt)',
       thresholdMB: 3072,
       productCode: 'vina4800',
-      active: false,
+      status: 2,
     },
   });
 
-  console.log('  ✓ Created 4 AlertConfigs (3 active, 1 inactive)');
+  console.log('  ✓ Created 4 AlertConfigs (3 mới, 1 đã kiểm tra)');
 
   // ── 8. Alert checks (một số đã được duyệt) ──────────────────────────────────
   await prisma.alertCheck.createMany({

@@ -1,11 +1,4 @@
-import {
-  IsBoolean,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Min,
-} from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUUID, Min, Max } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateAlertDto {
@@ -49,8 +42,10 @@ export class CreateAlertDto {
   @IsString()
   simCodeLabel?: string;
 
-  @ApiPropertyOptional({ description: 'Kích hoạt cảnh báo', default: true })
+  @ApiPropertyOptional({ description: '1 = Mới, 2 = Đã kiểm tra', default: 1 })
   @IsOptional()
-  @IsBoolean()
-  active?: boolean;
+  @IsInt()
+  @Min(1)
+  @Max(2)
+  status?: number;
 }

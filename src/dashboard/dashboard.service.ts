@@ -35,7 +35,7 @@ export class DashboardService {
             // Alert targeting this SIM directly
             {
               alertConfigs: {
-                some: { active: true },
+                some: { status: 1 },
               },
             },
             // Alert targeting a group this SIM belongs to
@@ -44,7 +44,7 @@ export class DashboardService {
                 some: {
                   group: {
                     alertConfigs: {
-                      some: { active: true },
+                      some: { status: 1 },
                     },
                   },
                 },
@@ -58,7 +58,7 @@ export class DashboardService {
                   productCode: {
                     in: await this.prismaService.alertConfig
                       .findMany({
-                        where: { active: true, productCode: { not: null } },
+                        where: { status: 1, productCode: { not: null } },
                         select: { productCode: true },
                       })
                       .then((rows) =>

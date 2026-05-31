@@ -25,6 +25,7 @@ import { UpdateAlertDto } from './dto/update-alert.dto';
 import { QueryAlertDto } from './dto/query-alert.dto';
 import { QueryTriggeredDto } from './dto/query-triggered.dto';
 import { BulkCheckDto } from './dto/bulk-check.dto';
+import { BulkCheckStatusDto } from './dto/bulk-check-status.dto';
 
 @ApiTags('alerts')
 @ApiBearerAuth()
@@ -42,6 +43,14 @@ export class AlertsController {
   @ApiOperation({ summary: 'Tạo cấu hình cảnh báo mới' })
   create(@Body() dto: CreateAlertDto) {
     return this.alertsService.create(dto);
+  }
+
+  @Post('bulk-check-status')
+  @ApiOperation({
+    summary: 'Đánh dấu hàng loạt cảnh báo là Đã kiểm tra (status 1 → 2)',
+  })
+  bulkCheckStatus(@Body() dto: BulkCheckStatusDto) {
+    return this.alertsService.bulkCheckStatus(dto);
   }
 
   @Patch(':id/toggle-active')
