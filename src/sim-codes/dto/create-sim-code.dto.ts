@@ -11,7 +11,7 @@ export class CreateSimCodeDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)
-  code: string;
+  code!: string;
 
   @IsOptional()
   @IsString()

@@ -147,7 +147,8 @@ model AlertConfig {
   productCode  String?  @map("product_code") @db.VarChar(50)
   ratingPlanId Int?     @map("rating_plan_id") @db.Integer
   simCodeLabel String?  @map("sim_code_label") @db.VarChar(50)
-  active       Boolean  @default(true)
+  /// 1 = Mới (đang hoạt động), 2 = Đã kiểm tra
+  status       Int      @default(1)
   createdAt    DateTime @default(now()) @map("created_at")
 
   sim         Sim?         @relation(fields: [simId], references: [id], onDelete: Cascade)

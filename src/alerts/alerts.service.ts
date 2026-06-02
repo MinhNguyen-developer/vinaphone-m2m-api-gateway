@@ -7,6 +7,7 @@ import { UpdateAlertDto } from './dto/update-alert.dto';
 import { QueryAlertDto } from './dto/query-alert.dto';
 import { QueryTriggeredDto } from './dto/query-triggered.dto';
 import { BulkCheckDto } from './dto/bulk-check.dto';
+import { BulkCheckStatusDto } from './dto/bulk-check-status.dto';
 
 @Injectable()
 export class AlertsService {
@@ -15,7 +16,7 @@ export class AlertsService {
   async findAll(dto: QueryAlertDto = {}) {
     const where: Prisma.AlertConfigWhereInput = {
       ...(dto.label && { label: { contains: dto.label, mode: 'insensitive' } }),
-      ...(dto.active !== undefined && { active: dto.active }),
+      ...(dto.status !== undefined && { status: dto.status }),
     };
     const page = dto.page ?? 1;
     const pageSize = dto.pageSize ?? 20;
@@ -40,7 +41,7 @@ export class AlertsService {
         productCode: a.productCode,
         ratingPlanId: a.ratingPlanId,
         simCodeLabel: a.simCodeLabel,
-        active: a.active,
+        status: a.status,
       })),
       total,
     };
@@ -52,9 +53,11 @@ export class AlertsService {
     });
     if (!existing)
       throw new NotFoundException(`AlertConfig ${id} không tồn tại`);
+    // Toggle between status 1 (Mới) and 2 (Đã kiểm tra) — 1-way for AlertConfig status is separate
+    // This endpoint is kept for backward compat but is no longer the primary status toggle
     return this.prisma.alertConfig.update({
       where: { id },
-      data: { active: !existing.active },
+      data: { status: existing.status === 1 ? 2 : 1 },
     });
   }
 
@@ -68,7 +71,7 @@ export class AlertsService {
         ratingPlanId: dto.ratingPlanId ?? null,
         productCode: dto.productCode ?? null,
         simCodeLabel: dto.simCodeLabel ?? null,
-        active: dto.active ?? true,
+        status: dto.status ?? 1,
       },
     });
     return alert;
@@ -94,7 +97,7 @@ export class AlertsService {
         ...(dto.simCodeLabel !== undefined && {
           simCodeLabel: dto.simCodeLabel,
         }),
-        ...(dto.active !== undefined && { active: dto.active }),
+        ...(dto.status !== undefined && { status: dto.status }),
       },
     });
   }
@@ -109,8 +112,9 @@ export class AlertsService {
   }
 
   async findTriggered(dto: QueryTriggeredDto = {}) {
+    // Only AlertConfigs with status=1 (Mới) are considered "active"
     const activeAlerts = await this.prisma.alertConfig.findMany({
-      where: { active: true },
+      where: { status: 1 },
     });
 
     const results: Array<{
@@ -191,7 +195,7 @@ export class AlertsService {
     });
 
     const activeAlerts = await this.prisma.alertConfig.findMany({
-      where: { active: true },
+      where: { status: 1 },
     });
 
     type CheckedResult = {
@@ -261,6 +265,15 @@ export class AlertsService {
       notFoundPhones: notFound,
       results: checkedResults,
     };
+  }
+
+  /** Bulk set status=2 (Đã kiểm tra) on AlertConfig records by id (1-way only) */
+  async bulkCheckStatus(dto: BulkCheckStatusDto) {
+    const result = await this.prisma.alertConfig.updateMany({
+      where: { id: { in: dto.ids }, status: 1 },
+      data: { status: 2 },
+    });
+    return { checked: result.count, requested: dto.ids.length };
   }
 
   async updateCheck(

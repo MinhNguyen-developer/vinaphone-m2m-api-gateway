@@ -80,7 +80,8 @@ export class QuerySimDto {
 
   @ApiPropertyOptional({
     enum: SimStatus,
-    description: '1=Mới, 2=Đã hoạt động, 3=Đã xác nhận',
+    description:
+      '1=Mới, 2=Đã hoạt động, 3=Đã xác nhận, 4=Đã hủy, 5=Tạm khoá, 6=Chờ huỷ',
   })
   @IsOptional()
   @Type(() => Number)
@@ -154,6 +155,12 @@ export class QuerySimDto {
   @Type(() => String)
   @IsString()
   activeDateTo?: string;
+
+  @ApiPropertyOptional({ description: 'Tìm theo mã SIM' })
+  @IsOptional()
+  @Type(() => String)
+  @IsString()
+  simCode?: string;
 
   @ApiPropertyOptional({
     description: 'Tìm sim thành viên hoặc chủ nhóm gói cước (SOG)',

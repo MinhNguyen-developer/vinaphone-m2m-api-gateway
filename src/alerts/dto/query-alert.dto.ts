@@ -1,5 +1,5 @@
-import { IsOptional, IsString, IsBoolean, IsInt, Min } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class QueryAlertDto {
@@ -9,16 +9,14 @@ export class QueryAlertDto {
   label?: string;
 
   @ApiPropertyOptional({
-    description: 'Lọc theo trạng thái kích hoạt (true/false)',
+    description: 'Lọc theo trạng thái: 1 = Mới, 2 = Đã kiểm tra',
   })
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === 'true' || value === true) return true;
-    if (value === 'false' || value === false) return false;
-    return value;
-  })
-  @IsBoolean()
-  active?: boolean;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(2)
+  status?: number;
 
   @ApiPropertyOptional({ default: 1, description: 'Trang hiện tại' })
   @IsOptional()
