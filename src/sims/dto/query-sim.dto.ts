@@ -60,7 +60,6 @@ export class QuerySimDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(200)
   pageSize?: number = 50;
 
   @ApiPropertyOptional()
