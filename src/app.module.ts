@@ -16,6 +16,7 @@ import { SimGroupModule } from './sim-group/sim-group.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { SimCodesModule } from './sim-codes/sim-codes.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { SimCodesModule } from './sim-codes/sim-codes.module';
     ContractsModule,
     DashboardModule,
     SimCodesModule,
+    ChatModule,
   ],
 })
 export class AppModule {}

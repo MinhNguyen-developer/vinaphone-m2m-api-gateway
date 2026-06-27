@@ -30,6 +30,9 @@ export default () => ({
   /** Secret sent by Vercel Cron in the Authorization: Bearer header */
   cronSecret: process.env.CRON_SECRET || '',
 
+  /** Base URL of the vinaphone-m2m-ai-agent service */
+  aiAgentUrl: process.env.AI_AGENT_URL || 'http://localhost:8000',
+
   redis: {
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
