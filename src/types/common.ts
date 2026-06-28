@@ -3,8 +3,10 @@ export enum SimStatus {
   ACTIVE = 2,
   CONFIRMED = 3,
   CANCELLED = 4,
-  SUSPENDED = 5,
+  LOCKED = 5,
   PENDING_CANCEL = 6,
+  REVOKED = 7,
+  PENDING_LOCK = 8,
 }
 
 export interface PaginatedResult<T> {

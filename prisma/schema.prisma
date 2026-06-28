@@ -159,12 +159,13 @@ model AlertConfig {
 }
 
 model AlertCheck {
-  id        String    @id @default(uuid()) @db.Uuid
-  simId     String    @map("sim_id") @db.Uuid
-  alertId   String    @map("alert_id") @db.Uuid
-  checked   Boolean   @default(false)
-  checkedAt DateTime? @map("checked_at")
-  checkedBy String?   @map("checked_by") @db.VarChar(100)
+  id          String    @id @default(uuid()) @db.Uuid
+  simId       String    @map("sim_id") @db.Uuid
+  alertId     String    @map("alert_id") @db.Uuid
+  checked     Boolean   @default(false)
+  triggeredAt DateTime? @map("triggered_at")
+  checkedAt   DateTime? @map("checked_at")
+  checkedBy   String?   @map("checked_by") @db.VarChar(100)
 
   sim   Sim         @relation(fields: [simId], references: [id], onDelete: Cascade)
   alert AlertConfig @relation(fields: [alertId], references: [id], onDelete: Cascade)

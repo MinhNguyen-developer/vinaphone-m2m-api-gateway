@@ -68,7 +68,10 @@ export class SimsService {
       ...(simType !== undefined && { simType }),
       ...(sogIsOwner !== undefined && { sogIsOwner: Boolean(sogIsOwner) }), // 1 → true, 0 → false, undefined → ignore
       ...(search && {
-        phoneNumber: { contains: search, mode: 'insensitive' },
+        OR: [
+          { phoneNumber: { contains: search, mode: 'insensitive' } },
+          { imsi: { contains: search, mode: 'insensitive' } },
+        ],
       }),
       ...(activeDateFrom &&
         activeDateTo && {
@@ -285,7 +288,7 @@ export class SimsService {
     if (dto.action === SimStatusAction.LOCK) {
       return this.prisma.sim.update({
         where: { id },
-        data: { status: SimStatus.SUSPENDED },
+        data: { status: SimStatus.LOCKED },
       });
     }
 
@@ -318,62 +321,20 @@ export class SimsService {
   }
 
   async batchUpdateStatus(dto: BatchUpdateSimStatusDto) {
-    const { ids, action } = dto;
+    const { ids, status } = dto;
 
-    console.log('IDS RECEIVED FOR BATCH UPDATE:', ids, 'ACTION:', action);
+    const normalisedIds = ids.map((id) => id.trim()).filter((id) => !!id);
 
-    if (action === SimStatusAction.CONFIRM) {
-      const simsToConfirm = await this.prisma.sim.findMany({
-        where: { id: { in: ids } },
-        select: { id: true },
-      });
-
-      console.log(
-        'SIMs to confirm:',
-        ids,
-        simsToConfirm.map((s) => s.id),
-      );
-
-      if (simsToConfirm.length === 0) {
-        throw new BadRequestException('Không có SIM để xác nhận');
-      }
-
-      return this.prisma.sim.updateMany({
-        where: { id: { in: simsToConfirm.map((s) => s.id) } },
-        data: { status: SimStatus.CONFIRMED, confirmedAt: new Date() },
-      });
+    if (normalisedIds.length === 0) {
+      throw new BadRequestException('Danh sách SIM không được rỗng');
     }
 
-    // Reset về trạng thái NEW
-    const simsToReset = await this.prisma.sim.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, phoneNumber: true },
-    });
-
-    if (simsToReset.length === 0) {
-      return { count: 0 };
-    }
-
-    const resetIds = simsToReset.map((s) => s.id);
-    const resetPhones = simsToReset.map((s) => s.phoneNumber);
-
-    return this.prisma.$transaction(async (tx) => {
-      await tx.simGroup.deleteMany({ where: { simId: { in: resetIds } } });
-      await tx.usageHistory.deleteMany({ where: { simId: { in: resetIds } } });
-      await tx.monthlyDataUsage.deleteMany({
-        where: { msisdn: { in: resetPhones } },
-      });
-      return tx.sim.updateMany({
-        where: { id: { in: resetIds } },
-        data: {
-          status: SimStatus.NEW,
-          usedMB: 0,
-          firstUsedAt: null,
-          confirmedAt: null,
-          note: null,
-          resetDate: new Date(),
-        },
-      });
+    return this.prisma.sim.updateMany({
+      where: { id: { in: normalisedIds } },
+      data: {
+        status,
+        ...(status === SimStatus.CONFIRMED ? { confirmedAt: new Date() } : {}),
+      },
     });
   }
 
@@ -462,7 +423,7 @@ export class SimsService {
 
     const result = await this.prisma.sim.updateMany({
       where: { phoneNumber: { in: normalised } },
-      data: { status: SimStatus.SUSPENDED },
+      data: { status: SimStatus.LOCKED },
     });
 
     return {

@@ -123,6 +123,7 @@ export class AlertsService {
       };
       alert: { id: string; label: string; thresholdMB: number };
       checked: boolean;
+      triggeredAt: Date | null;
     }> = [];
 
     for (const alert of activeAlerts) {
@@ -153,9 +154,29 @@ export class AlertsService {
       });
 
       for (const sim of sims) {
-        const check = await this.prisma.alertCheck.findUnique({
+        let check = await this.prisma.alertCheck.findUnique({
           where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
         });
+
+        if (!check) {
+          // Persist first time this alert/sim pair is detected as triggered.
+          check = await this.prisma.alertCheck.create({
+            data: {
+              simId: sim.id,
+              alertId: alert.id,
+              checked: false,
+              checkedAt: null,
+              checkedBy: null,
+              triggeredAt: new Date(),
+            },
+          });
+        } else if (!check.checked && !check.triggeredAt) {
+          // Backfill legacy rows created before triggeredAt existed.
+          check = await this.prisma.alertCheck.update({
+            where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
+            data: { triggeredAt: new Date() },
+          });
+        }
 
         // Only return unchecked items
         if (check?.checked) continue;
@@ -164,6 +185,7 @@ export class AlertsService {
           sim,
           alert,
           checked: false,
+          triggeredAt: check.triggeredAt ?? null,
         });
       }
     }
@@ -240,6 +262,7 @@ export class AlertsService {
             simId: sim.id,
             alertId: alert.id,
             checked: true,
+            triggeredAt: new Date(),
             checkedAt: new Date(),
             checkedBy: username,
           },
@@ -302,6 +325,7 @@ export class AlertsService {
         simId,
         alertId,
         checked: dto.checked,
+        triggeredAt: new Date(),
         checkedAt: dto.checked ? new Date() : null,
         checkedBy: dto.checked ? username : null,
       },
