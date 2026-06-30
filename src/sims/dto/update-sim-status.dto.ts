@@ -1,5 +1,6 @@
 import { IsArray, IsEnum, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { SimStatus } from '../../types/common';
 
 export enum SimStatusAction {
   CONFIRM = 'confirm',
@@ -21,9 +22,12 @@ export class BatchUpdateSimStatusDto {
   @IsString({ each: true })
   ids!: string[];
 
-  @ApiProperty({ enum: SimStatusAction })
-  @IsEnum(SimStatusAction)
-  action!: SimStatusAction;
+  @ApiProperty({
+    enum: SimStatus,
+    description: 'Trạng thái cần chuyển cho danh sách SIM',
+  })
+  @IsEnum(SimStatus)
+  status!: SimStatus;
 }
 
 export class BulkCancelSimsByPhoneDto {

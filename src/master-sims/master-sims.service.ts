@@ -35,7 +35,6 @@ export class MasterSimsService {
         OR: [
           { phoneNumber: { contains: search, mode: 'insensitive' } },
           { imsi: { contains: search, mode: 'insensitive' } },
-          { contractCode: { contains: search, mode: 'insensitive' } },
         ],
       }),
     };
