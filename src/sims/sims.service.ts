@@ -19,6 +19,8 @@ import {
   BulkResetSimsByPhoneDto,
   BulkLockSimsByPhoneDto,
   BulkPendingCancelSimsByPhoneDto,
+  BulkPendingRevokeSimsByPhoneDto,
+  BulkPendingLockSimsByPhoneDto,
 } from './dto/update-sim-status.dto';
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
@@ -299,6 +301,27 @@ export class SimsService {
       });
     }
 
+    if (dto.action === SimStatusAction.PENDING_LOCK) {
+      return this.prisma.sim.update({
+        where: { id },
+        data: { status: SimStatus.PENDING_LOCK },
+      });
+    }
+
+    if (dto.action === SimStatusAction.PENDING_REVOKE) {
+      return this.prisma.sim.update({
+        where: { id },
+        data: { status: SimStatus.REVOKED },
+      });
+    }
+
+    if (dto.action === SimStatusAction.CANCEL) {
+      return this.prisma.sim.update({
+        where: { id },
+        data: { status: SimStatus.CANCELLED },
+      });
+    }
+
     // Reset về trạng thái NEW và xóa lịch sử dữ liệu
     return this.prisma.$transaction(async (tx) => {
       await tx.usageHistory.deleteMany({ where: { simId: id } });
@@ -338,48 +361,72 @@ export class SimsService {
     });
   }
 
-  async bulkCancelSims(dto: BulkCancelSimsByPhoneDto) {
-    const { phoneNumbers } = dto;
+  private buildImsiSuffixWhere(imsis: string[]): Prisma.SimWhereInput {
+    return {
+      OR: [...new Set(imsis)].map((imsiSuffix) => ({
+        imsi: { endsWith: imsiSuffix, mode: 'insensitive' },
+      })),
+    };
+  }
 
-    const normalised = phoneNumbers
+  async bulkCancelSims(dto: BulkCancelSimsByPhoneDto) {
+    const { imsis } = dto;
+
+    console.log(
+      '🚀 ~ file: sims.service.ts:334 ~ SimsService ~ bulkCancelSims ~ imsis:',
+      imsis,
+    );
+
+    const normalised = (imsis || [])
       .map((p) => p.trim())
       .filter((p) => p.length > 0);
 
-    if (normalised.length === 0) {
-      throw new BadRequestException('Danh sách số điện thoại không được rỗng');
+    if (!normalised.length) {
+      throw new BadRequestException('Danh sách IMSI không được rỗng');
     }
 
+    const where = this.buildImsiSuffixWhere(normalised);
+
     const result = await this.prisma.sim.updateMany({
-      where: { phoneNumber: { in: normalised } },
+      where,
       data: { status: SimStatus.CANCELLED },
     });
+
+    console.log(
+      '🚀 ~ file: sims.service.ts:334 ~ SimsService ~ bulkCancelSims ~ result:',
+      result,
+    );
 
     return {
       cancelled: result.count,
       requested: normalised.length,
-      notFound: normalised.length - result.count,
+      notFound: Math.max(normalised.length - result.count, 0),
     };
   }
 
   async bulkResetSims(dto: BulkResetSimsByPhoneDto) {
-    const { phoneNumbers } = dto;
+    const { imsis } = dto;
 
-    const normalised = phoneNumbers
+    const normalised = (imsis || [])
       .map((p) => p.trim())
       .filter((p) => p.length > 0);
 
     if (normalised.length === 0) {
-      throw new BadRequestException('Danh sách số điện thoại không được rỗng');
+      throw new BadRequestException('Danh sách IMSI không được rỗng');
     }
 
+    const where = this.buildImsiSuffixWhere(normalised);
+
     const found = await this.prisma.sim.findMany({
-      where: { phoneNumber: { in: normalised } },
-      select: { id: true, phoneNumber: true },
+      where,
+      select: { id: true, imsi: true },
     });
 
     if (found.length > 0) {
       const foundIds = found.map((s) => s.id);
-      const foundPhones = found.map((s) => s.phoneNumber);
+      const foundImsis = found
+        .map((s) => s.imsi)
+        .filter((imsi): imsi is string => !!imsi);
 
       await this.prisma.$transaction([
         this.prisma.simGroup.deleteMany({
@@ -389,7 +436,7 @@ export class SimsService {
           where: { simId: { in: foundIds } },
         }),
         this.prisma.monthlyDataUsage.deleteMany({
-          where: { msisdn: { in: foundPhones } },
+          where: { sim: { imsi: { in: foundImsis, mode: 'insensitive' } } },
         }),
         this.prisma.sim.updateMany({
           where: { id: { in: foundIds } },
@@ -408,49 +455,99 @@ export class SimsService {
     return {
       reset: found.length,
       requested: normalised.length,
-      notFound: normalised.length - found.length,
+      notFound: Math.max(normalised.length - found.length, 0),
     };
   }
 
   async bulkLockSims(dto: BulkLockSimsByPhoneDto) {
-    const normalised = dto.phoneNumbers
+    const normalised = (dto.imsis || [])
       .map((p) => p.trim())
       .filter((p) => p.length > 0);
 
     if (normalised.length === 0) {
-      throw new BadRequestException('Danh sách số điện thoại không được rỗng');
+      throw new BadRequestException('Danh sách IMSI không được rỗng');
     }
 
+    const where = this.buildImsiSuffixWhere(normalised);
+
     const result = await this.prisma.sim.updateMany({
-      where: { phoneNumber: { in: normalised } },
+      where,
       data: { status: SimStatus.LOCKED },
     });
 
     return {
       locked: result.count,
       requested: normalised.length,
-      notFound: normalised.length - result.count,
+      notFound: Math.max(normalised.length - result.count, 0),
     };
   }
 
   async bulkPendingCancelSims(dto: BulkPendingCancelSimsByPhoneDto) {
-    const normalised = dto.phoneNumbers
+    const normalised = (dto.imsis || [])
       .map((p) => p.trim())
       .filter((p) => p.length > 0);
 
     if (normalised.length === 0) {
-      throw new BadRequestException('Danh sách số điện thoại không được rỗng');
+      throw new BadRequestException('Danh sách IMSI không được rỗng');
     }
 
+    const where = this.buildImsiSuffixWhere(normalised);
+
     const result = await this.prisma.sim.updateMany({
-      where: { phoneNumber: { in: normalised } },
+      where,
       data: { status: SimStatus.PENDING_CANCEL },
     });
 
     return {
       pendingCancelled: result.count,
       requested: normalised.length,
-      notFound: normalised.length - result.count,
+      notFound: Math.max(normalised.length - result.count, 0),
+    };
+  }
+
+  async bulkPendingLockSims(dto: BulkPendingLockSimsByPhoneDto) {
+    const normalised = (dto.imsis || [])
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    if (normalised.length === 0) {
+      throw new BadRequestException('Danh sách IMSI không được rỗng');
+    }
+
+    const where = this.buildImsiSuffixWhere(normalised);
+
+    const result = await this.prisma.sim.updateMany({
+      where,
+      data: { status: SimStatus.PENDING_LOCK },
+    });
+
+    return {
+      pendingLocked: result.count,
+      requested: normalised.length,
+      notFound: Math.max(normalised.length - result.count, 0),
+    };
+  }
+
+  async bulkPendingRevokeSims(dto: BulkPendingRevokeSimsByPhoneDto) {
+    const normalised = (dto.imsis || [])
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    if (normalised.length === 0) {
+      throw new BadRequestException('Danh sách IMSI không được rỗng');
+    }
+
+    const where = this.buildImsiSuffixWhere(normalised);
+
+    const result = await this.prisma.sim.updateMany({
+      where,
+      data: { status: SimStatus.REVOKED },
+    });
+
+    return {
+      pendingRevoked: result.count,
+      requested: normalised.length,
+      notFound: Math.max(normalised.length - result.count, 0),
     };
   }
 

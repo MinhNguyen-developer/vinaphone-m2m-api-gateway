@@ -18,4 +18,11 @@ export class QueryTriggeredDto {
   @IsOptional()
   @IsString()
   sort?: string;
+
+  @ApiPropertyOptional({
+    description: 'Lọc theo tên cảnh báo',
+  })
+  @IsOptional()
+  @IsString()
+  alertLabel?: string;
 }
