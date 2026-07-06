@@ -80,7 +80,7 @@ export class QuerySimDto {
   @ApiPropertyOptional({
     enum: SimStatus,
     description:
-      '1=Mới, 2=Đã hoạt động, 3=Đã xác nhận, 4=Đã hủy, 5=Đã khoá, 6=Chờ huỷ , 7=Thu hồi, 8=Chờ khoá',
+      '1=Mới, 2=Đã hoạt động, 3=Đã xác nhận, 4=Đã hủy, 5=Đã khoá, 6=Chờ huỷ , 7=Chờ thu hồi, 8=Chờ khoá',
   })
   @IsOptional()
   @Type(() => Number)

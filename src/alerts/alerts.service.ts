@@ -114,7 +114,12 @@ export class AlertsService {
   async findTriggered(dto: QueryTriggeredDto = {}) {
     // Only AlertConfigs with status=1 (Mới) are considered "active"
     const activeAlerts = await this.prisma.alertConfig.findMany({
-      where: { status: 1 },
+      where: {
+        status: 1,
+        label: dto.alertLabel
+          ? { contains: dto.alertLabel, mode: 'insensitive' }
+          : undefined,
+      },
     });
 
     const results: Array<{
