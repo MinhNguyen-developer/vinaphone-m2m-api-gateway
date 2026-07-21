@@ -369,33 +369,36 @@ export class SimsService {
     };
   }
 
+  private buildPhoneNumberOrImsiSuffixWhere(
+    values: string[],
+  ): Prisma.SimWhereInput {
+    const uniqueValues = [...new Set(values)];
+
+    return {
+      OR: uniqueValues.flatMap((value) => [
+        { phoneNumber: value },
+        { imsi: { endsWith: value, mode: 'insensitive' } },
+      ]),
+    };
+  }
+
   async bulkCancelSims(dto: BulkCancelSimsByPhoneDto) {
-    const { imsis } = dto;
-
-    console.log(
-      '🚀 ~ file: sims.service.ts:334 ~ SimsService ~ bulkCancelSims ~ imsis:',
-      imsis,
-    );
-
-    const normalised = (imsis || [])
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
+    const normalised = (dto.numbers || [])
+      .map((value) => String(value).trim())
+      .filter((value) => value.length > 0);
 
     if (!normalised.length) {
-      throw new BadRequestException('Danh sách IMSI không được rỗng');
+      throw new BadRequestException(
+        'Danh sách số điện thoại/IMSI không được rỗng',
+      );
     }
 
-    const where = this.buildImsiSuffixWhere(normalised);
+    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
       data: { status: SimStatus.CANCELLED },
     });
-
-    console.log(
-      '🚀 ~ file: sims.service.ts:334 ~ SimsService ~ bulkCancelSims ~ result:',
-      result,
-    );
 
     return {
       cancelled: result.count,
