@@ -1,5 +1,6 @@
 import { IsArray, IsEnum, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { SimStatus } from '../../types/common';
 
 export enum SimStatusAction {
@@ -35,12 +36,26 @@ export class BatchUpdateSimStatusDto {
 export class BulkCancelSimsByPhoneDto {
   @ApiProperty({
     type: [String],
-    description: 'Danh sách IMSI cần hủy (chỉ lấy 10 số cuối)',
+    description:
+      'Danh sách IMSI cần hủy (chỉ lấy 10 số cuối) hoặc số điện thoại',
+  })
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) {
+      return value;
+    }
+
+    const values = Array.isArray(value) ? value : [value];
+
+    return values.map((item) =>
+      typeof item === 'string' || typeof item === 'number'
+        ? String(item)
+        : item,
+    );
   })
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
-  imsis?: string[];
+  numbers?: string[];
 }
 
 export class BulkResetSimsByPhoneDto {
