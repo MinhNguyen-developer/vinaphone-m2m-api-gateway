@@ -15,22 +15,23 @@ datasource db {
 // ─────────────────────────────────────────────
 
 model Sim {
-  id            String    @id @default(uuid()) @db.Uuid
-  phoneNumber   String    @unique @map("phone_number") @db.VarChar(15)
-  imsi          String?   @unique @db.VarChar(15)
-  contractCode  String?   @map("contract_code") @db.VarChar(50)
-  productCode   String    @map("product_code") @db.VarChar(50)
-  masterSimCode String?   @map("master_sim_code") @db.VarChar(20)
-  systemStatus  String?   @map("system_status") @db.VarChar(20)
+  id              String    @id @default(uuid()) @db.Uuid
+  phoneNumber     String    @unique @map("phone_number") @db.VarChar(15)
+  imsi            String?   @unique @db.VarChar(15)
+  contractCode    String?   @map("contract_code") @db.VarChar(50)
+  productCode     String    @map("product_code") @db.VarChar(50)
+  masterSimCode   String?   @map("master_sim_code") @db.VarChar(20)
+  systemStatus    String?   @map("system_status") @db.VarChar(20)
+  vinaphoneStatus Int?      @map("vinaphone_status")
   /// 1 = Mới, 2 = Đã hoạt động, 3 = Đã xác nhận
-  status        Int       @default(1)
-  usedMB        Int       @default(0) @map("used_mb")
-  firstUsedAt   DateTime? @map("first_used_at")
-  confirmedAt   DateTime? @map("confirmed_at")
-  resetDate     DateTime? @map("reset_date")
-  createdAt     DateTime  @map("created_at") @db.Date
-  note          String?   @db.Text
-  syncedAt      DateTime? @map("synced_at")
+  status          Int       @default(1)
+  usedMB          Int       @default(0) @map("used_mb")
+  firstUsedAt     DateTime? @map("first_used_at")
+  confirmedAt     DateTime? @map("confirmed_at")
+  resetDate       DateTime? @map("reset_date")
+  createdAt       DateTime  @map("created_at") @db.Date
+  note            String?   @db.Text
+  syncedAt        DateTime? @map("synced_at")
 
   simType Int @default(0) @map("sim_type") // 0 = M2M, 1 = e-sim
 

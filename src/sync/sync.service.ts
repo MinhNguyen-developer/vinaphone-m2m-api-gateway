@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import dayjs from 'dayjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { SimStatus } from '../types/common';
+import { AlertsService } from '../alerts/alerts.service';
 import type {
   VinaphoneLoginResponse,
   QuickSearchSimItem,
@@ -29,17 +30,17 @@ function parseSog(sogRaw: string | null | undefined): SogItem | null {
   }
 }
 
-/** Map numeric status from Vinaphone to internal status string */
+/** Map numeric status from Vinaphone to a display label */
 function mapSimStatus(code: number): string {
   switch (code) {
-    case 1:
-      return 'Mới';
     case 2:
       return 'Đang hoạt động';
     case 3:
-      return 'Tạm khoá';
+      return 'Khoá 1 chiều';
     case 4:
-      return 'Huỷ';
+      return 'Khoá 2 chiều';
+    case 5:
+      return 'Đã hủy';
     default:
       return String(code);
   }
@@ -70,6 +71,7 @@ export class SyncService {
     private readonly prisma: PrismaService,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
+    private readonly alertsService: AlertsService,
   ) {}
 
   // ─── Token management ──────────────────────────────────────────────────────
@@ -280,6 +282,7 @@ export class SyncService {
           usedMB: newUsedMB,
           syncedAt: now,
           systemStatus: mapSimStatus(vSim.status),
+          vinaphoneStatus: vSim.status,
           imsi: vSim.imsi ? String(vSim.imsi) : (existing?.imsi ?? null),
           contractCode: vSim.contractCode ?? existing?.contractCode ?? null,
           sogGroupId,
@@ -383,6 +386,16 @@ export class SyncService {
           ),
         );
       }
+
+      const syncedSimIds = upserts
+        .map(({ phoneNumber }) => simIdMap.get(phoneNumber))
+        .filter((simId): simId is string => !!simId);
+
+      const createdAlertChecks =
+        await this.alertsService.syncTriggeredAlertsBySimIds(syncedSimIds);
+      this.logger.log(
+        `Alert trigger sync completed: ${createdAlertChecks} trigger record(s) created.`,
+      );
 
       // Sync group members for all unique chủ nhóm groups
       for (const [groupId, groupName] of groupsToSync) {

@@ -18,7 +18,9 @@ FROM node:20-alpine AS production
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV TZ=Asia/Ho_Chi_Minh
+ENV TZ=Asia/Bangkok
+
+RUN apk add --no-cache postgresql-client tzdata
 
 COPY package*.json ./
 COPY prisma ./prisma

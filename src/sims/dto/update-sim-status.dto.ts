@@ -1,5 +1,5 @@
 import { IsArray, IsEnum, IsOptional, IsString } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { SimStatus } from '../../types/common';
 
@@ -33,11 +33,11 @@ export class BatchUpdateSimStatusDto {
   status!: SimStatus;
 }
 
-export class BulkCancelSimsByPhoneDto {
-  @ApiProperty({
+class BulkSimIdentifiersDto {
+  @ApiPropertyOptional({
     type: [String],
     description:
-      'Danh sách IMSI cần hủy (chỉ lấy 10 số cuối) hoặc số điện thoại',
+      'Danh sách số điện thoại hoặc IMSI cần thao tác (IMSI có thể truyền đủ hoặc 10 số cuối)',
   })
   @Transform(({ value }) => {
     if (value === undefined || value === null) {
@@ -56,12 +56,23 @@ export class BulkCancelSimsByPhoneDto {
   @IsString({ each: true })
   @IsOptional()
   numbers?: string[];
-}
 
-export class BulkResetSimsByPhoneDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     type: [String],
-    description: 'Danh sách IMSI cần hủy (chỉ lấy 10 số cuối)',
+    description: 'Payload cũ, giữ tương thích: danh sách IMSI',
+  })
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) {
+      return value;
+    }
+
+    const values = Array.isArray(value) ? value : [value];
+
+    return values.map((item) =>
+      typeof item === 'string' || typeof item === 'number'
+        ? String(item)
+        : item,
+    );
   })
   @IsArray()
   @IsString({ each: true })
@@ -69,46 +80,14 @@ export class BulkResetSimsByPhoneDto {
   imsis?: string[];
 }
 
-export class BulkLockSimsByPhoneDto {
-  @ApiProperty({
-    type: [String],
-    description: 'Danh sách IMSI cần hủy (chỉ lấy 10 số cuối)',
-  })
-  @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  imsis?: string[];
-}
+export class BulkCancelSimsByPhoneDto extends BulkSimIdentifiersDto {}
 
-export class BulkPendingCancelSimsByPhoneDto {
-  @ApiProperty({
-    type: [String],
-    description: 'Danh sách IMSI cần hủy (chỉ lấy 10 số cuối)',
-  })
-  @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  imsis?: string[];
-}
+export class BulkResetSimsByPhoneDto extends BulkSimIdentifiersDto {}
 
-export class BulkPendingLockSimsByPhoneDto {
-  @ApiProperty({
-    type: [String],
-    description: 'Danh sách IMSI cần khoá (chỉ lấy 10 số cuối)',
-  })
-  @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  imsis?: string[];
-}
+export class BulkLockSimsByPhoneDto extends BulkSimIdentifiersDto {}
 
-export class BulkPendingRevokeSimsByPhoneDto {
-  @ApiProperty({
-    type: [String],
-    description: 'Danh sách IMSI cần thu hồi (chỉ lấy 10 số cuối)',
-  })
-  @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  imsis?: string[];
-}
+export class BulkPendingCancelSimsByPhoneDto extends BulkSimIdentifiersDto {}
+
+export class BulkPendingLockSimsByPhoneDto extends BulkSimIdentifiersDto {}
+
+export class BulkPendingRevokeSimsByPhoneDto extends BulkSimIdentifiersDto {}

@@ -94,26 +94,29 @@ export class SimsController {
   }
 
   @Post('bulk-cancel')
-  @ApiOperation({ summary: 'Hủy hàng loạt SIM theo số điện thoại' })
+  @ApiOperation({ summary: 'Hủy hàng loạt SIM theo số điện thoại hoặc IMSI' })
   bulkCancelSims(@Body() dto: BulkCancelSimsByPhoneDto) {
     return this.simsService.bulkCancelSims(dto);
   }
 
   @Post('bulk-reset')
-  @ApiOperation({ summary: 'Reset hàng loạt SIM theo số điện thoại' })
+  @ApiOperation({ summary: 'Reset hàng loạt SIM theo số điện thoại hoặc IMSI' })
   bulkResetSims(@Body() dto: BulkResetSimsByPhoneDto) {
     return this.simsService.bulkResetSims(dto);
   }
 
   @Post('bulk-lock')
-  @ApiOperation({ summary: 'Tạm khoá hàng loạt SIM theo số điện thoại' })
+  @ApiOperation({
+    summary: 'Tạm khoá hàng loạt SIM theo số điện thoại hoặc IMSI',
+  })
   bulkLockSims(@Body() dto: BulkLockSimsByPhoneDto) {
     return this.simsService.bulkLockSims(dto);
   }
 
   @Post('bulk-pending-cancel')
   @ApiOperation({
-    summary: 'Chuyển trạng thái Chờ huỷ hàng loạt SIM theo số điện thoại',
+    summary:
+      'Chuyển trạng thái Chờ huỷ hàng loạt SIM theo số điện thoại hoặc IMSI',
   })
   bulkPendingCancelSims(@Body() dto: BulkPendingCancelSimsByPhoneDto) {
     return this.simsService.bulkPendingCancelSims(dto);
@@ -121,7 +124,8 @@ export class SimsController {
 
   @Post('bulk-pending-lock')
   @ApiOperation({
-    summary: 'Chuyển trạng thái Chờ khoá hàng loạt SIM theo số điện thoại',
+    summary:
+      'Chuyển trạng thái Chờ khoá hàng loạt SIM theo số điện thoại hoặc IMSI',
   })
   bulkPendingLockSims(@Body() dto: BulkPendingLockSimsByPhoneDto) {
     return this.simsService.bulkPendingLockSims(dto);
@@ -129,7 +133,8 @@ export class SimsController {
 
   @Post('bulk-pending-revoke')
   @ApiOperation({
-    summary: 'Chuyển trạng thái Chờ thu hồi hàng loạt SIM theo số điện thoại',
+    summary:
+      'Chuyển trạng thái Chờ thu hồi hàng loạt SIM theo số điện thoại hoặc IMSI',
   })
   bulkPendingRevokeSims(@Body() dto: BulkPendingRevokeSimsByPhoneDto) {
     return this.simsService.bulkPendingRevokeSims(dto);
