@@ -9,9 +9,94 @@ import { QueryTriggeredDto } from './dto/query-triggered.dto';
 import { BulkCheckDto } from './dto/bulk-check.dto';
 import { BulkCheckStatusDto } from './dto/bulk-check-status.dto';
 
+type TriggerableAlertConfig = {
+  id: string;
+  label: string;
+  thresholdMB: number;
+  simId: string | null;
+  groupId: string | null;
+  productCode: string | null;
+  ratingPlanId: number | null;
+  simCodeLabel: string | null;
+};
+
+type TriggerableSim = Sim & {
+  simGroups: Array<{ groupId: string; group: { id: string; name: string } | null }>;
+  simCode: { id: string; code: string } | null;
+};
+
 @Injectable()
 export class AlertsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private buildSimWhereForAlert(
+    alert: TriggerableAlertConfig,
+    extraConditions: Prisma.SimWhereInput[] = [],
+  ): Prisma.SimWhereInput {
+    const conditions: Prisma.SimWhereInput[] = [
+      ...extraConditions,
+      { usedMB: { gte: alert.thresholdMB } },
+    ];
+
+    if (alert.simId) {
+      conditions.push({ id: alert.simId });
+    }
+    if (alert.groupId) {
+      conditions.push({ simGroups: { some: { groupId: alert.groupId } } });
+    }
+    if (alert.productCode) {
+      conditions.push({ productCode: alert.productCode });
+    }
+    if (alert.ratingPlanId) {
+      conditions.push({ ratingPlanId: alert.ratingPlanId });
+    }
+    if (alert.simCodeLabel) {
+      conditions.push({ simCodeLabel: alert.simCodeLabel });
+    }
+
+    return { AND: conditions };
+  }
+
+  private async ensureTriggeredAlert(
+    sim: TriggerableSim,
+    alert: TriggerableAlertConfig,
+  ): Promise<{
+    created: boolean;
+    check: { checked: boolean; triggeredAt: Date | null };
+  }> {
+    let check = await this.prisma.alertCheck.findUnique({
+      where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
+    });
+
+    let created = false;
+
+    if (!check) {
+      check = await this.prisma.alertCheck.create({
+        data: {
+          simId: sim.id,
+          alertId: alert.id,
+          checked: false,
+          checkedAt: null,
+          checkedBy: null,
+          triggeredAt: new Date(),
+        },
+      });
+      created = true;
+    } else if (!check.checked && !check.triggeredAt) {
+      check = await this.prisma.alertCheck.update({
+        where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
+        data: { triggeredAt: new Date() },
+      });
+    }
+
+    return {
+      created,
+      check: {
+        checked: check.checked,
+        triggeredAt: check.triggeredAt ?? null,
+      },
+    };
+  }
 
   async findAll(dto: QueryAlertDto = {}) {
     const where: Prisma.AlertConfigWhereInput = {
@@ -111,6 +196,37 @@ export class AlertsService {
     await this.prisma.alertConfig.delete({ where: { id } });
   }
 
+  async syncTriggeredAlertsBySimIds(simIds: string[] = []) {
+    const distinctSimIds = [...new Set(simIds.filter(Boolean))];
+    if (distinctSimIds.length === 0) return 0;
+
+    const activeAlerts = await this.prisma.alertConfig.findMany({
+      where: { status: 1 },
+    });
+
+    let createdCount = 0;
+
+    for (const alert of activeAlerts) {
+      const sims = await this.prisma.sim.findMany({
+        where: this.buildSimWhereForAlert(alert, [{ id: { in: distinctSimIds } }]),
+        include: {
+          simGroups: {
+            include: { group: true },
+          },
+          simCode: { select: { id: true, code: true } },
+        },
+      });
+
+      for (const sim of sims as TriggerableSim[]) {
+        const { created, check } = await this.ensureTriggeredAlert(sim, alert);
+        if (check.checked) continue;
+        if (created) createdCount++;
+      }
+    }
+
+    return createdCount;
+  }
+
   async findTriggered(dto: QueryTriggeredDto = {}) {
     // Only AlertConfigs with status=1 (Mới) are considered "active"
     const activeAlerts = await this.prisma.alertConfig.findMany({
@@ -132,21 +248,12 @@ export class AlertsService {
     }> = [];
 
     for (const alert of activeAlerts) {
-      const simWhere: Prisma.SimWhereInput = {
-        usedMB: { gte: alert.thresholdMB },
-        ...(alert.simId && { id: alert.simId }),
-        ...(alert.groupId && {
-          simGroups: { some: { groupId: alert.groupId } },
-        }),
-        ...(alert.productCode && { productCode: alert.productCode }),
-        ...(alert.ratingPlanId && { ratingPlanId: alert.ratingPlanId }),
-        ...(alert.simCodeLabel && { simCodeLabel: alert.simCodeLabel }),
-        // Apply filters from query
-        ...(dto.groupId && {
-          simGroups: { some: { groupId: dto.groupId } },
-        }),
-        ...(dto.simCodeLabel && { simCodeLabel: dto.simCodeLabel }),
-      };
+      const simWhere = this.buildSimWhereForAlert(alert, [
+        ...(dto.groupId
+          ? [{ simGroups: { some: { groupId: dto.groupId } } }]
+          : []),
+        ...(dto.simCodeLabel ? [{ simCodeLabel: dto.simCodeLabel }] : []),
+      ]);
 
       const sims = await this.prisma.sim.findMany({
         where: simWhere,
@@ -159,32 +266,10 @@ export class AlertsService {
       });
 
       for (const sim of sims) {
-        let check = await this.prisma.alertCheck.findUnique({
-          where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
-        });
-
-        if (!check) {
-          // Persist first time this alert/sim pair is detected as triggered.
-          check = await this.prisma.alertCheck.create({
-            data: {
-              simId: sim.id,
-              alertId: alert.id,
-              checked: false,
-              checkedAt: null,
-              checkedBy: null,
-              triggeredAt: new Date(),
-            },
-          });
-        } else if (!check.checked && !check.triggeredAt) {
-          // Backfill legacy rows created before triggeredAt existed.
-          check = await this.prisma.alertCheck.update({
-            where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
-            data: { triggeredAt: new Date() },
-          });
-        }
+        const { check } = await this.ensureTriggeredAlert(sim as TriggerableSim, alert);
 
         // Only return unchecked items
-        if (check?.checked) continue;
+        if (check.checked) continue;
 
         results.push({
           sim,

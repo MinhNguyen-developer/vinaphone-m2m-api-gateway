@@ -55,11 +55,17 @@ export interface QuickSearchParams {
   keySearch?: string;
 }
 
+export enum VinaphoneSimStatus {
+  ACTIVE = 2,
+  ONE_WAY_LOCKED = 3,
+  TWO_WAY_LOCKED = 4,
+  CANCELLED = 5,
+}
 export interface QuickSearchSimItem {
   msisdn: number;
   iccid: string | null;
-  /** 1=Mới, 2=Đang hoạt động, 3=Tạm khoá, 4=Huỷ */
-  status: number;
+  /** 2=Đang hoạt động, 3=Khoá 1 chiều, 4=Khoá 2 chiều, 5=Huỷ */
+  status: VinaphoneSimStatus;
   imsi: number;
   usagedData: number; // bytes
   ratingPlanName: string;
@@ -72,7 +78,7 @@ export interface QuickSearchSimItem {
   customerCode: string;
   contractCode: string;
   contractDate: string | null; // E.g: "2025-05-04T17:00:00.000+00:00"
-  activatedDate: string | null;
+  activatedDate: string | null; // E.g: "2025-05-04T17:00:00.000+00:00"
   contractInfo: string | null;
   groupName: string | null;
   centerCode: string | null;

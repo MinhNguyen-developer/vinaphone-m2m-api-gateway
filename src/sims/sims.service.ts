@@ -39,6 +39,7 @@ export class SimsService {
       masterSimCode,
       systemStatus,
       status,
+      vinaphoneStatus,
       search,
       contractCode,
       imsi,
@@ -67,6 +68,7 @@ export class SimsService {
         simGroups: { some: { groupId: { in: groupId } } },
       }),
       ...(status && { status }),
+      ...(vinaphoneStatus && { vinaphoneStatus }),
       ...(simType !== undefined && { simType }),
       ...(sogIsOwner !== undefined && { sogIsOwner: Boolean(sogIsOwner) }), // 1 → true, 0 → false, undefined → ignore
       ...(search && {
@@ -77,7 +79,7 @@ export class SimsService {
       }),
       ...(activeDateFrom &&
         activeDateTo && {
-          firstUsedAt: {
+          vinaphoneActivatedAt: {
             gte: dayjs(activeDateFrom, 'YYYY-MM-DD').startOf('day').toDate(),
             lte: dayjs(activeDateTo, 'YYYY-MM-DD').endOf('day').toDate(),
           },
@@ -94,10 +96,11 @@ export class SimsService {
         'ratingPlanName',
         'usedMB',
         'firstUsedAt',
+        'vinaphoneActivatedAt',
+        'vinaphoneStatus',
         'sogIsOwner',
         'status',
         'note',
-        'vinaphoneActivatedAt',
         'sogMaster',
         'simCodeLabel',
       ]);
@@ -213,11 +216,14 @@ export class SimsService {
         groupName: true,
         ratingPlanName: true,
         productCode: true,
+        systemStatus: true,
+        vinaphoneStatus: true,
         sogIsOwner: true,
         sogGroupId: true,
         sogGroupName: true,
         usedMB: true,
         firstUsedAt: true,
+        vinaphoneActivatedAt: true,
         note: true,
         status: true,
         simGroups: {
@@ -328,7 +334,7 @@ export class SimsService {
       await tx.monthlyDataUsage.deleteMany({
         where: { msisdn: sim.phoneNumber },
       });
-      await tx.simGroup.deleteMany({ where: { simId: id } });
+      // await tx.simGroup.deleteMany({ where: { simId: id } });
       return tx.sim.update({
         where: { id },
         data: {
@@ -382,17 +388,24 @@ export class SimsService {
     };
   }
 
-  async bulkCancelSims(dto: BulkCancelSimsByPhoneDto) {
-    const normalised = (dto.numbers || [])
+  private normaliseBulkIdentifiers(
+    dto: { numbers?: string[]; imsis?: string[] },
+    emptyMessage = 'Danh sách số điện thoại/IMSI không được rỗng',
+  ) {
+    const values = [...(dto.numbers ?? []), ...(dto.imsis ?? [])];
+    const normalised = values
       .map((value) => String(value).trim())
       .filter((value) => value.length > 0);
 
     if (!normalised.length) {
-      throw new BadRequestException(
-        'Danh sách số điện thoại/IMSI không được rỗng',
-      );
+      throw new BadRequestException(emptyMessage);
     }
 
+    return normalised;
+  }
+
+  async bulkCancelSims(dto: BulkCancelSimsByPhoneDto) {
+    const normalised = this.normaliseBulkIdentifiers(dto);
     const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
@@ -408,21 +421,12 @@ export class SimsService {
   }
 
   async bulkResetSims(dto: BulkResetSimsByPhoneDto) {
-    const { imsis } = dto;
-
-    const normalised = (imsis || [])
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-
-    if (normalised.length === 0) {
-      throw new BadRequestException('Danh sách IMSI không được rỗng');
-    }
-
-    const where = this.buildImsiSuffixWhere(normalised);
+    const normalised = this.normaliseBulkIdentifiers(dto);
+    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
 
     const found = await this.prisma.sim.findMany({
       where,
-      select: { id: true, imsi: true },
+      select: { id: true, imsi: true, phoneNumber: true },
     });
 
     if (found.length > 0) {
@@ -430,16 +434,22 @@ export class SimsService {
       const foundImsis = found
         .map((s) => s.imsi)
         .filter((imsi): imsi is string => !!imsi);
+      const foundPhoneNumbers = found.map((s) => s.phoneNumber);
 
       await this.prisma.$transaction([
-        this.prisma.simGroup.deleteMany({
-          where: { simId: { in: foundIds } },
-        }),
+        // this.prisma.simGroup.deleteMany({
+        //   where: { simId: { in: foundIds } },
+        // }),
         this.prisma.usageHistory.deleteMany({
           where: { simId: { in: foundIds } },
         }),
         this.prisma.monthlyDataUsage.deleteMany({
-          where: { sim: { imsi: { in: foundImsis, mode: 'insensitive' } } },
+          where: {
+            OR: [
+              { msisdn: { in: foundPhoneNumbers } },
+              { sim: { imsi: { in: foundImsis, mode: 'insensitive' } } },
+            ],
+          },
         }),
         this.prisma.sim.updateMany({
           where: { id: { in: foundIds } },
@@ -463,15 +473,8 @@ export class SimsService {
   }
 
   async bulkLockSims(dto: BulkLockSimsByPhoneDto) {
-    const normalised = (dto.imsis || [])
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-
-    if (normalised.length === 0) {
-      throw new BadRequestException('Danh sách IMSI không được rỗng');
-    }
-
-    const where = this.buildImsiSuffixWhere(normalised);
+    const normalised = this.normaliseBulkIdentifiers(dto);
+    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
@@ -486,15 +489,8 @@ export class SimsService {
   }
 
   async bulkPendingCancelSims(dto: BulkPendingCancelSimsByPhoneDto) {
-    const normalised = (dto.imsis || [])
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-
-    if (normalised.length === 0) {
-      throw new BadRequestException('Danh sách IMSI không được rỗng');
-    }
-
-    const where = this.buildImsiSuffixWhere(normalised);
+    const normalised = this.normaliseBulkIdentifiers(dto);
+    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
@@ -509,15 +505,8 @@ export class SimsService {
   }
 
   async bulkPendingLockSims(dto: BulkPendingLockSimsByPhoneDto) {
-    const normalised = (dto.imsis || [])
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-
-    if (normalised.length === 0) {
-      throw new BadRequestException('Danh sách IMSI không được rỗng');
-    }
-
-    const where = this.buildImsiSuffixWhere(normalised);
+    const normalised = this.normaliseBulkIdentifiers(dto);
+    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
@@ -532,15 +521,8 @@ export class SimsService {
   }
 
   async bulkPendingRevokeSims(dto: BulkPendingRevokeSimsByPhoneDto) {
-    const normalised = (dto.imsis || [])
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-
-    if (normalised.length === 0) {
-      throw new BadRequestException('Danh sách IMSI không được rỗng');
-    }
-
-    const where = this.buildImsiSuffixWhere(normalised);
+    const normalised = this.normaliseBulkIdentifiers(dto);
+    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
@@ -656,6 +638,7 @@ export class SimsService {
       productCode: sim.productCode,
       masterSimCode: sim.masterSimCode,
       systemStatus: sim.systemStatus,
+      vinaphoneStatus: sim.vinaphoneStatus,
       status: sim.status,
       usedMB: sim.usedMB,
       firstUsedAt: sim.firstUsedAt

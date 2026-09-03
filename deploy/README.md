@@ -1,3 +1,45 @@
+# Production Deployment
+
+## Backup Email Cron
+
+The API image now includes `pg_dump` and runs with `TZ=Asia/Bangkok` so the backup job
+can enforce the Monday-Saturday 07:00-19:00 GMT+7 operating window.
+
+No EC2-side mail server is needed. The instance only needs outbound access to your SMTP
+provider on the port you configure, plus the backup and SMTP credentials below.
+
+If you use Gmail, enable 2-Step Verification on the account first, then create an App
+Password and use that value in `SMTP_PASS`. Gmail will not accept your normal account
+password for SMTP.
+
+Required environment variables:
+
+- `BACKUP_CRON` defaults to `0 18 * * 1-6`
+- `BACKUP_TIMEZONE` defaults to `Asia/Bangkok`
+- `BACKUP_EMAIL_TO` defaults to `d9.fatm@gmail.com`
+- `BACKUP_ARTIFACT_PREFIX` defaults to `vinaphone-backup`
+- `BACKUP_TEMP_DIRECTORY` is optional
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`
+
+Example values for production `.env`:
+
+```env
+BACKUP_CRON=0 18 * * 1-6
+BACKUP_TIMEZONE=Asia/Bangkok
+BACKUP_EMAIL_TO=d9.fatm@gmail.com
+BACKUP_ARTIFACT_PREFIX=vinaphone-backup
+BACKUP_TEMP_DIRECTORY=
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=yourname@gmail.com
+SMTP_PASS=your_gmail_app_password
+SMTP_FROM=yourname@gmail.com
+```
+
+The job runs inside the API process, writes a temporary backup artifact, emails it as an
+attachment, and removes the file after delivery.
 # Deployment Guide — vinaphone-m2m-api-gateway → EC2
 
 ## Architecture
@@ -81,6 +123,19 @@ VINAPHONE_API_KEY=<your-key>
 VINAPHONE_API_TIMEOUT_MS=10000
 
 SYNC_CRON=*/10 * * * *
+
+BACKUP_CRON=0 18 * * 1-6
+BACKUP_TIMEZONE=Asia/Bangkok
+BACKUP_EMAIL_TO=d9.fatm@gmail.com
+BACKUP_ARTIFACT_PREFIX=vinaphone-backup
+BACKUP_TEMP_DIRECTORY=
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your_smtp_user
+SMTP_PASS=your_smtp_password
+SMTP_FROM=your_sender@example.com
 
 IMAGE_FULL=ghcr.io/<your-github-username>/vinaphone-m2m-api-gateway
 IMAGE_TAG=latest

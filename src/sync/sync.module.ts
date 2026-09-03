@@ -3,9 +3,11 @@ import { HttpModule } from '@nestjs/axios';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SyncService } from './sync.service';
 import { SyncController } from './sync.controller';
+import { AlertsModule } from '../alerts/alerts.module';
 
 @Module({
   imports: [
+    AlertsModule,
     HttpModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({

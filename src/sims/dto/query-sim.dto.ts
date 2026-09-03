@@ -12,12 +12,14 @@ import {
 import { Type, Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { SimStatus } from '../../types/common';
+import { VinaphoneSimStatus } from '../../sync/vinaphone-api.types';
 
 // Allowed sortable columns (whitelist to prevent arbitrary field injection)
 const SORTABLE_FIELDS = [
   'phoneNumber',
   'imsi',
   'status',
+  'vinaphoneStatus',
   'simType',
   'usedMB',
   'activatedDate',
@@ -86,6 +88,16 @@ export class QuerySimDto {
   @Type(() => Number)
   @IsEnum(SimStatus)
   status?: SimStatus;
+
+  @ApiPropertyOptional({
+    enum: VinaphoneSimStatus,
+    description:
+      'Trạng thái VNPT: 2=Đang hoạt động, 3=Khoá 1 chiều, 4=Khoá 2 chiều, 5=Đã hủy',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsEnum(VinaphoneSimStatus)
+  vinaphoneStatus?: VinaphoneSimStatus;
 
   @ApiPropertyOptional({ description: 'Tìm theo SĐT' })
   @IsOptional()
@@ -173,7 +185,7 @@ export class QuerySimDto {
   @ApiPropertyOptional({
     description:
       'Sort by one or more fields. Format: "field:asc" or comma-separated "field:asc,field2:desc". ' +
-      'Allowed fields: phoneNumber, imsi, status, simType, usedMB, activatedDate, createdAt.',
+      'Allowed fields: phoneNumber, imsi, status, vinaphoneStatus, simType, usedMB, activatedDate, createdAt.',
     example: 'phoneNumber:asc',
   })
   @IsOptional()
