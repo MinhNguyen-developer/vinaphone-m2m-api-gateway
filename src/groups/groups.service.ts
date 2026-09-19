@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
@@ -128,59 +132,75 @@ export class GroupsService {
   }
 
   async create(dto: CreateGroupDto) {
-    const group = await this.prisma.group.create({
-      data: {
-        name: dto.name,
-        description: dto.description,
-        simGroups: dto.simIds?.length
-          ? { create: dto.simIds.map((simId) => ({ simId })) }
-          : undefined,
-      },
-      include: { _count: { select: { simGroups: true } } },
+    return this.prisma.$transaction(async (tx) => {
+      const simIds = await this.resolveSimIds(
+        tx,
+        dto.simIds,
+        dto.simIdentifiers,
+      );
+      const group = await tx.group.create({
+        data: {
+          name: dto.name,
+          description: dto.description,
+          simGroups: simIds.length
+            ? { create: simIds.map((simId) => ({ simId })) }
+            : undefined,
+        },
+        include: { _count: { select: { simGroups: true } } },
+      });
+      return {
+        id: group.id,
+        name: group.name,
+        description: group.description ?? '',
+        simCount: group._count.simGroups,
+        createdAt: group.createdAt,
+      };
     });
-    return {
-      id: group.id,
-      name: group.name,
-      description: group.description ?? '',
-      simCount: group._count.simGroups,
-      createdAt: group.createdAt,
-    };
   }
 
   async update(id: string, dto: UpdateGroupDto) {
     await this.findOneOrThrow(id);
 
-    // Update group fields
-    const group = await this.prisma.group.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.description !== undefined && { description: dto.description }),
-      },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const hasSimMembershipUpdate =
+        dto.simIds !== undefined || dto.simIdentifiers !== undefined;
+      const simIds = hasSimMembershipUpdate
+        ? await this.resolveSimIds(tx, dto.simIds, dto.simIdentifiers)
+        : undefined;
 
-    // If simIds provided, replace all sim memberships
-    if (dto.simIds !== undefined) {
-      await this.prisma.simGroup.deleteMany({ where: { groupId: id } });
-      if (dto.simIds.length > 0) {
-        await this.prisma.simGroup.createMany({
-          data: dto.simIds.map((simId) => ({ simId, groupId: id })),
-          skipDuplicates: true,
-        });
+      const group = await tx.group.update({
+        where: { id },
+        data: {
+          ...(dto.name !== undefined && { name: dto.name }),
+          ...(dto.description !== undefined && {
+            description: dto.description,
+          }),
+        },
+      });
+
+      // If SIM identifiers are provided, replace all sim memberships.
+      if (simIds !== undefined) {
+        await tx.simGroup.deleteMany({ where: { groupId: id } });
+        if (simIds.length > 0) {
+          await tx.simGroup.createMany({
+            data: simIds.map((simId) => ({ simId, groupId: id })),
+            skipDuplicates: true,
+          });
+        }
       }
-    }
 
-    const updated = await this.prisma.group.findUnique({
-      where: { id },
-      include: { _count: { select: { simGroups: true } } },
+      const updated = await tx.group.findUnique({
+        where: { id },
+        include: { _count: { select: { simGroups: true } } },
+      });
+      return {
+        id: updated!.id,
+        name: updated!.name,
+        description: updated!.description ?? '',
+        simCount: updated!._count.simGroups,
+        createdAt: updated!.createdAt,
+      };
     });
-    return {
-      id: updated!.id,
-      name: updated!.name,
-      description: updated!.description ?? '',
-      simCount: updated!._count.simGroups,
-      createdAt: updated!.createdAt,
-    };
   }
 
   async remove(id: string) {
@@ -192,5 +212,66 @@ export class GroupsService {
     const group = await this.prisma.group.findUnique({ where: { id } });
     if (!group) throw new NotFoundException(`Nhóm ${id} không tồn tại`);
     return group;
+  }
+
+  private async resolveSimIds(
+    db: PrismaService | Prisma.TransactionClient,
+    simIds?: string[],
+    simIdentifiers?: string[],
+  ): Promise<string[]> {
+    const resolvedIds = new Set(simIds ?? []);
+    const identifiers = Array.from(
+      new Set(
+        (simIdentifiers ?? [])
+          .map((identifier) => identifier.trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (identifiers.length > 0) {
+      const sims = await db.sim.findMany({
+        where: {
+          OR: [
+            { phoneNumber: { in: identifiers } },
+            { imsi: { in: identifiers } },
+          ],
+        },
+        select: { id: true, phoneNumber: true, imsi: true },
+      });
+      const identifierToId = new Map<string, string>();
+      sims.forEach((sim) => {
+        identifierToId.set(sim.phoneNumber, sim.id);
+        if (sim.imsi) identifierToId.set(sim.imsi, sim.id);
+        resolvedIds.add(sim.id);
+      });
+
+      const notFound = identifiers.filter(
+        (identifier) => !identifierToId.has(identifier),
+      );
+      if (notFound.length > 0) {
+        throw new BadRequestException(
+          'Không tìm thấy SIM theo số điện thoại hoặc IMSI: ' +
+            notFound.join(', '),
+        );
+      }
+    }
+
+    if (resolvedIds.size > 0) {
+      const existing = await db.sim.findMany({
+        where: { id: { in: Array.from(resolvedIds) } },
+        select: { id: true },
+      });
+      if (existing.length !== resolvedIds.size) {
+        const existingIds = new Set(existing.map((sim) => sim.id));
+        const notFoundIds = Array.from(resolvedIds).filter(
+          (simId) => !existingIds.has(simId),
+        );
+        throw new BadRequestException(
+          'Không tìm thấy SIM theo ID: ' + notFoundIds.join(', '),
+        );
+      }
+    }
+
+    return Array.from(resolvedIds);
   }
 }

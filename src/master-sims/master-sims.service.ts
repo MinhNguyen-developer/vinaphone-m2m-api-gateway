@@ -20,6 +20,7 @@ export class MasterSimsService {
       ratingPlanId,
       sort,
       groupId,
+      groupName,
     } = params;
 
     const where: Prisma.SimWhereInput = {
@@ -30,7 +31,18 @@ export class MasterSimsService {
       ...(contractCode && {
         contractCode: { contains: contractCode, mode: 'insensitive' },
       }),
-      ...(groupId && { simGroups: { some: { groupId } } }),
+      ...((groupId || groupName) && {
+        simGroups: {
+          some: {
+            ...(groupId && { groupId }),
+            ...(groupName && {
+              group: {
+                name: { contains: groupName, mode: 'insensitive' },
+              },
+            }),
+          },
+        },
+      }),
       ...(search && {
         OR: [
           { phoneNumber: { contains: search, mode: 'insensitive' } },
