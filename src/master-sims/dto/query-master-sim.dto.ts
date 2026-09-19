@@ -57,4 +57,9 @@ export class QueryMasterSimDto {
   @IsOptional()
   @IsUUID('4')
   groupId?: string;
+
+  @ApiPropertyOptional({ description: 'Tìm theo tên nhóm thiết bị' })
+  @IsOptional()
+  @IsString()
+  groupName?: string;
 }

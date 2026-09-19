@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsArray,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateGroupDto {
   @ApiProperty({ description: 'Tên nhóm', maxLength: 100 })
@@ -12,9 +18,21 @@ export class CreateGroupDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional({ type: [String], description: 'Danh sách SIM ID trong nhóm' })
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Danh sách SIM ID trong nhóm',
+  })
   @IsOptional()
   @IsArray()
   @IsUUID('4', { each: true })
   simIds?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Danh sách số điện thoại hoặc IMSI của SIM trong nhóm',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  simIdentifiers?: string[];
 }
