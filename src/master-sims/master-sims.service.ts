@@ -47,6 +47,7 @@ export class MasterSimsService {
         OR: [
           { phoneNumber: { contains: search, mode: 'insensitive' } },
           { imsi: { contains: search, mode: 'insensitive' } },
+          { internalImsi: { contains: search, mode: 'insensitive' } },
         ],
       }),
     };
@@ -54,6 +55,7 @@ export class MasterSimsService {
     const orderBy = mapSortStringToOrderInput<Sim>(sort, [
       'phoneNumber',
       'imsi',
+      'internalImsi',
       'ratingPlanName',
       'usedMB',
       'contractCode',

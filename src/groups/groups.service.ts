@@ -233,15 +233,16 @@ export class GroupsService {
         where: {
           OR: [
             { phoneNumber: { in: identifiers } },
-            { imsi: { in: identifiers } },
+            { internalImsi: { in: identifiers } },
           ],
         },
-        select: { id: true, phoneNumber: true, imsi: true },
+        select: { id: true, phoneNumber: true, internalImsi: true },
       });
       const identifierToId = new Map<string, string>();
       sims.forEach((sim) => {
         identifierToId.set(sim.phoneNumber, sim.id);
-        if (sim.imsi) identifierToId.set(sim.imsi, sim.id);
+        if (sim.internalImsi)
+          identifierToId.set(sim.internalImsi, sim.id);
         resolvedIds.add(sim.id);
       });
 
@@ -250,7 +251,7 @@ export class GroupsService {
       );
       if (notFound.length > 0) {
         throw new BadRequestException(
-          'Không tìm thấy SIM theo số điện thoại hoặc IMSI: ' +
+          'Không tìm thấy SIM theo số điện thoại hoặc IMSI nội bộ: ' +
             notFound.join(', '),
         );
       }

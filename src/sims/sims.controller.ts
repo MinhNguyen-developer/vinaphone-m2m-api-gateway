@@ -94,20 +94,24 @@ export class SimsController {
   }
 
   @Post('bulk-cancel')
-  @ApiOperation({ summary: 'Hủy hàng loạt SIM theo số điện thoại hoặc IMSI' })
+  @ApiOperation({
+    summary: 'Hủy hàng loạt SIM theo số điện thoại hoặc IMSI nội bộ',
+  })
   bulkCancelSims(@Body() dto: BulkCancelSimsByPhoneDto) {
     return this.simsService.bulkCancelSims(dto);
   }
 
   @Post('bulk-reset')
-  @ApiOperation({ summary: 'Reset hàng loạt SIM theo số điện thoại hoặc IMSI' })
+  @ApiOperation({
+    summary: 'Reset hàng loạt SIM theo số điện thoại hoặc IMSI nội bộ',
+  })
   bulkResetSims(@Body() dto: BulkResetSimsByPhoneDto) {
     return this.simsService.bulkResetSims(dto);
   }
 
   @Post('bulk-lock')
   @ApiOperation({
-    summary: 'Tạm khoá hàng loạt SIM theo số điện thoại hoặc IMSI',
+    summary: 'Tạm khoá hàng loạt SIM theo số điện thoại hoặc IMSI nội bộ',
   })
   bulkLockSims(@Body() dto: BulkLockSimsByPhoneDto) {
     return this.simsService.bulkLockSims(dto);
@@ -116,7 +120,7 @@ export class SimsController {
   @Post('bulk-pending-cancel')
   @ApiOperation({
     summary:
-      'Chuyển trạng thái Chờ huỷ hàng loạt SIM theo số điện thoại hoặc IMSI',
+      'Chuyển trạng thái Chờ huỷ hàng loạt SIM theo số điện thoại hoặc IMSI nội bộ',
   })
   bulkPendingCancelSims(@Body() dto: BulkPendingCancelSimsByPhoneDto) {
     return this.simsService.bulkPendingCancelSims(dto);
@@ -125,7 +129,7 @@ export class SimsController {
   @Post('bulk-pending-lock')
   @ApiOperation({
     summary:
-      'Chuyển trạng thái Chờ khoá hàng loạt SIM theo số điện thoại hoặc IMSI',
+      'Chuyển trạng thái Chờ khoá hàng loạt SIM theo số điện thoại hoặc IMSI nội bộ',
   })
   bulkPendingLockSims(@Body() dto: BulkPendingLockSimsByPhoneDto) {
     return this.simsService.bulkPendingLockSims(dto);
@@ -134,7 +138,7 @@ export class SimsController {
   @Post('bulk-pending-revoke')
   @ApiOperation({
     summary:
-      'Chuyển trạng thái Chờ thu hồi hàng loạt SIM theo số điện thoại hoặc IMSI',
+      'Chuyển trạng thái Chờ thu hồi hàng loạt SIM theo số điện thoại hoặc IMSI nội bộ',
   })
   bulkPendingRevokeSims(@Body() dto: BulkPendingRevokeSimsByPhoneDto) {
     return this.simsService.bulkPendingRevokeSims(dto);

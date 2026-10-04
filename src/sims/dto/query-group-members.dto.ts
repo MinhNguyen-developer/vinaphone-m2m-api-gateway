@@ -22,6 +22,11 @@ export class QueryGroupMembersDto {
   @IsString()
   msisdn?: string;
 
+  @ApiPropertyOptional({ description: 'Tìm theo 10 số cuối IMSI nội bộ' })
+  @IsOptional()
+  @IsString()
+  internalImsi?: string;
+
   @ApiPropertyOptional({ description: 'e.g. "usedMB:desc"' })
   @IsOptional()
   @IsString()
