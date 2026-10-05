@@ -18,6 +18,7 @@ import { VinaphoneSimStatus } from '../../sync/vinaphone-api.types';
 const SORTABLE_FIELDS = [
   'phoneNumber',
   'imsi',
+  'internalImsi',
   'status',
   'vinaphoneStatus',
   'simType',
@@ -114,6 +115,11 @@ export class QuerySimDto {
   @IsString()
   imsi?: string;
 
+  @ApiPropertyOptional({ description: 'Tìm theo 10 số cuối IMSI nội bộ' })
+  @IsOptional()
+  @IsString()
+  internalImsi?: string;
+
   @ApiPropertyOptional({ description: 'Tìm theo gói cước' })
   @IsOptional()
   @Type(() => Number)
@@ -185,7 +191,7 @@ export class QuerySimDto {
   @ApiPropertyOptional({
     description:
       'Sort by one or more fields. Format: "field:asc" or comma-separated "field:asc,field2:desc". ' +
-      'Allowed fields: phoneNumber, imsi, status, vinaphoneStatus, simType, usedMB, activatedDate, createdAt.',
+      'Allowed fields: phoneNumber, imsi, internalImsi, status, vinaphoneStatus, simType, usedMB, activatedDate, createdAt.',
     example: 'phoneNumber:asc',
   })
   @IsOptional()

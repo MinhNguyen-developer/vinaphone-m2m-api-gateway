@@ -43,6 +43,7 @@ export class SimsService {
       search,
       contractCode,
       imsi,
+      internalImsi,
       ratingPlanId,
       groupName,
       groupId,
@@ -61,6 +62,9 @@ export class SimsService {
       ...(systemStatus && { systemStatus }),
       ...(groupName && { groupName }),
       ...(imsi && { imsi: { contains: imsi, mode: 'insensitive' } }),
+      ...(internalImsi && {
+        internalImsi: { contains: internalImsi, mode: 'insensitive' },
+      }),
       ...(contractCode && {
         contractCode: { contains: contractCode, mode: 'insensitive' },
       }),
@@ -75,6 +79,7 @@ export class SimsService {
         OR: [
           { phoneNumber: { contains: search, mode: 'insensitive' } },
           { imsi: { contains: search, mode: 'insensitive' } },
+          { internalImsi: { contains: search, mode: 'insensitive' } },
         ],
       }),
       ...(activeDateFrom &&
@@ -93,6 +98,7 @@ export class SimsService {
         'phoneNumber',
         'groupName',
         'imsi',
+        'internalImsi',
         'ratingPlanName',
         'usedMB',
         'firstUsedAt',
@@ -212,6 +218,7 @@ export class SimsService {
         id: true,
         phoneNumber: true,
         imsi: true,
+        internalImsi: true,
         contractCode: true,
         groupName: true,
         ratingPlanName: true,
@@ -367,15 +374,7 @@ export class SimsService {
     });
   }
 
-  private buildImsiSuffixWhere(imsis: string[]): Prisma.SimWhereInput {
-    return {
-      OR: [...new Set(imsis)].map((imsiSuffix) => ({
-        imsi: { endsWith: imsiSuffix, mode: 'insensitive' },
-      })),
-    };
-  }
-
-  private buildPhoneNumberOrImsiSuffixWhere(
+  private buildPhoneNumberOrInternalImsiWhere(
     values: string[],
   ): Prisma.SimWhereInput {
     const uniqueValues = [...new Set(values)];
@@ -383,14 +382,14 @@ export class SimsService {
     return {
       OR: uniqueValues.flatMap((value) => [
         { phoneNumber: value },
-        { imsi: { endsWith: value, mode: 'insensitive' } },
+        { internalImsi: { equals: value, mode: 'insensitive' } },
       ]),
     };
   }
 
   private normaliseBulkIdentifiers(
     dto: { numbers?: string[]; imsis?: string[] },
-    emptyMessage = 'Danh sách số điện thoại/IMSI không được rỗng',
+    emptyMessage = 'Danh sách số điện thoại/IMSI nội bộ không được rỗng',
   ) {
     const values = [...(dto.numbers ?? []), ...(dto.imsis ?? [])];
     const normalised = values
@@ -406,7 +405,7 @@ export class SimsService {
 
   async bulkCancelSims(dto: BulkCancelSimsByPhoneDto) {
     const normalised = this.normaliseBulkIdentifiers(dto);
-    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
+    const where = this.buildPhoneNumberOrInternalImsiWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
@@ -422,7 +421,7 @@ export class SimsService {
 
   async bulkResetSims(dto: BulkResetSimsByPhoneDto) {
     const normalised = this.normaliseBulkIdentifiers(dto);
-    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
+    const where = this.buildPhoneNumberOrInternalImsiWhere(normalised);
 
     const found = await this.prisma.sim.findMany({
       where,
@@ -474,7 +473,7 @@ export class SimsService {
 
   async bulkLockSims(dto: BulkLockSimsByPhoneDto) {
     const normalised = this.normaliseBulkIdentifiers(dto);
-    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
+    const where = this.buildPhoneNumberOrInternalImsiWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
@@ -490,7 +489,7 @@ export class SimsService {
 
   async bulkPendingCancelSims(dto: BulkPendingCancelSimsByPhoneDto) {
     const normalised = this.normaliseBulkIdentifiers(dto);
-    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
+    const where = this.buildPhoneNumberOrInternalImsiWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
@@ -506,7 +505,7 @@ export class SimsService {
 
   async bulkPendingLockSims(dto: BulkPendingLockSimsByPhoneDto) {
     const normalised = this.normaliseBulkIdentifiers(dto);
-    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
+    const where = this.buildPhoneNumberOrInternalImsiWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
@@ -522,7 +521,7 @@ export class SimsService {
 
   async bulkPendingRevokeSims(dto: BulkPendingRevokeSimsByPhoneDto) {
     const normalised = this.normaliseBulkIdentifiers(dto);
-    const where = this.buildPhoneNumberOrImsiSuffixWhere(normalised);
+    const where = this.buildPhoneNumberOrInternalImsiWhere(normalised);
 
     const result = await this.prisma.sim.updateMany({
       where,
@@ -579,18 +578,30 @@ export class SimsService {
   }
 
   async getGroupMembers(groupId: string, query: QueryGroupMembersDto) {
-    const { page = 1, pageSize = 50, msisdn, sort } = query;
+    const { page = 1, pageSize = 50, msisdn, internalImsi, sort } = query;
+    const searchConditions: Prisma.SimWhereInput[] = [];
+    if (msisdn) {
+      searchConditions.push({
+        phoneNumber: { contains: msisdn, mode: 'insensitive' },
+      });
+    }
+    if (internalImsi) {
+      searchConditions.push({
+        internalImsi: { contains: internalImsi, mode: 'insensitive' },
+      });
+    }
 
     const where: Prisma.SimWhereInput = {
       sogGroupId: groupId,
       sogIsOwner: false,
-      ...(msisdn && { phoneNumber: { contains: msisdn, mode: 'insensitive' } }),
+      ...(searchConditions.length > 0 && { OR: searchConditions }),
     };
 
     const orderBy = mapSortStringToOrderInput<Sim>(sort, [
       'usedMB',
       'phoneNumber',
       'imsi',
+      'internalImsi',
       'note',
       'simCodeLabel',
       'status',
@@ -604,6 +615,7 @@ export class SimsService {
           id: true,
           phoneNumber: true,
           imsi: true,
+          internalImsi: true,
           note: true,
           simCodeLabel: true,
           ratingPlanName: true,
@@ -634,6 +646,8 @@ export class SimsService {
       id: sim.id,
       phoneNumber: sim.phoneNumber,
       imsi: sim.imsi,
+      internalImsi:
+        sim.internalImsi ?? (sim.imsi ? sim.imsi.slice(-10) : null),
       contractCode: sim.contractCode,
       productCode: sim.productCode,
       masterSimCode: sim.masterSimCode,

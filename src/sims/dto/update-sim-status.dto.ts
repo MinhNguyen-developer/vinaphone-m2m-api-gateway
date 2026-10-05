@@ -37,7 +37,7 @@ class BulkSimIdentifiersDto {
   @ApiPropertyOptional({
     type: [String],
     description:
-      'Danh sách số điện thoại hoặc IMSI cần thao tác (IMSI có thể truyền đủ hoặc 10 số cuối)',
+      'Danh sách số điện thoại hoặc IMSI nội bộ (10 số cuối) cần thao tác',
   })
   @Transform(({ value }) => {
     if (value === undefined || value === null) {
@@ -59,7 +59,8 @@ class BulkSimIdentifiersDto {
 
   @ApiPropertyOptional({
     type: [String],
-    description: 'Payload cũ, giữ tương thích: danh sách IMSI',
+    description:
+      'Payload cũ, giữ tương thích: danh sách IMSI nội bộ (10 số cuối)',
   })
   @Transform(({ value }) => {
     if (value === undefined || value === null) {

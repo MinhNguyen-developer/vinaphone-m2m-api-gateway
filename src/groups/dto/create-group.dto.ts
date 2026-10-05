@@ -29,7 +29,8 @@ export class CreateGroupDto {
 
   @ApiPropertyOptional({
     type: [String],
-    description: 'Danh sách số điện thoại hoặc IMSI của SIM trong nhóm',
+    description:
+      'Danh sách số điện thoại hoặc IMSI nội bộ (10 số cuối) của SIM trong nhóm',
   })
   @IsOptional()
   @IsArray()

@@ -18,7 +18,9 @@ export class QueryMasterSimDto {
   @Max(200)
   pageSize?: number = 50;
 
-  @ApiPropertyOptional({ description: 'Tìm theo SĐT/IMSI/hợp đồng' })
+  @ApiPropertyOptional({
+    description: 'Tìm theo SĐT/IMSI/IMSI nội bộ/hợp đồng',
+  })
   @IsOptional()
   @IsString()
   search?: string;
@@ -47,7 +49,8 @@ export class QueryMasterSimDto {
   @ApiPropertyOptional({
     description:
       'Sắp xếp. Format: "field:asc" hoặc "field:desc". ' +
-      'Allowed: phoneNumber, imsi, ratingPlanName, usedMB, contractCode.',
+      'Allowed: phoneNumber, imsi, internalImsi, ratingPlanName, ' +
+      'usedMB, contractCode.',
   })
   @IsOptional()
   @IsString()
