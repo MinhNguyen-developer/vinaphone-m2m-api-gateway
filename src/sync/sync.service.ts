@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
+import { Observable, Subject, firstValueFrom } from 'rxjs';
 import dayjs from 'dayjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { SimStatus } from '../types/common';
@@ -59,6 +59,21 @@ function normalizeMsisdn(msisdn: number | string): string {
   return raw;
 }
 
+export type SyncJobName =
+  | 'syncSims'
+  | 'syncRatingPlans'
+  | 'syncGroupSims'
+  | 'syncMonthlyUsage';
+
+export interface SyncJobStatus {
+  state: 'idle' | 'running' | 'completed' | 'failed';
+  progress: string;
+  progressPercent: number;
+  updatedAt: string;
+  lastSyncedAt?: string;
+  error?: string;
+}
+
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
@@ -66,6 +81,15 @@ export class SyncService {
   private cachedToken: string | null = null;
   private tokenExpiresAt = 0; // Unix timestamp (seconds)
   private isSyncing = false; // guard against overlapping runs
+  private readonly syncStatusSubject = new Subject<
+    Record<SyncJobName, SyncJobStatus>
+  >();
+  private readonly syncJobs: Record<SyncJobName, SyncJobStatus> = {
+    syncSims: this.initialSyncStatus(),
+    syncRatingPlans: this.initialSyncStatus(),
+    syncGroupSims: this.initialSyncStatus(),
+    syncMonthlyUsage: this.initialSyncStatus(),
+  };
 
   constructor(
     private readonly prisma: PrismaService,
@@ -73,6 +97,66 @@ export class SyncService {
     private readonly configService: ConfigService,
     private readonly alertsService: AlertsService,
   ) {}
+
+  getSyncStatus(): Record<SyncJobName, SyncJobStatus> {
+    const includeErrors =
+      this.configService.get<string>('nodeEnv') === 'development';
+    return Object.fromEntries(
+      Object.entries(this.syncJobs).map(([job, status]) => [
+        job,
+        {
+          ...status,
+          ...(!includeErrors ? { error: undefined } : {}),
+        },
+      ]),
+    ) as Record<SyncJobName, SyncJobStatus>;
+  }
+
+  watchSyncStatus(): Observable<Record<SyncJobName, SyncJobStatus>> {
+    return this.syncStatusSubject.asObservable();
+  }
+
+  private initialSyncStatus(): SyncJobStatus {
+    return {
+      state: 'idle',
+      progress: '',
+      progressPercent: 0,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private updateSyncStatus(
+    job: SyncJobName,
+    state: SyncJobStatus['state'],
+    progress: string,
+    error?: unknown,
+    progressPercent?: number,
+  ) {
+    const updatedAt = new Date().toISOString();
+    const currentStatus = this.syncJobs[job];
+    const details =
+      state === 'failed' && error instanceof Error
+        ? { error: error.message }
+        : {};
+    this.syncJobs[job] = {
+      state,
+      progress,
+      progressPercent:
+        state === 'completed'
+          ? 100
+          : (progressPercent ?? currentStatus.progressPercent),
+      updatedAt,
+      ...(state === 'completed'
+        ? { lastSyncedAt: updatedAt }
+        : currentStatus.lastSyncedAt
+          ? { lastSyncedAt: currentStatus.lastSyncedAt }
+          : {}),
+      ...(this.configService.get<string>('nodeEnv') === 'development'
+        ? details
+        : {}),
+    };
+    this.syncStatusSubject.next(this.getSyncStatus());
+  }
 
   // ─── Token management ──────────────────────────────────────────────────────
 
@@ -153,6 +237,13 @@ export class SyncService {
       return;
     }
     this.isSyncing = true;
+    this.updateSyncStatus(
+      'syncSims',
+      'running',
+      'SIM dữ liệu đang được tải...',
+      undefined,
+      0,
+    );
     this.logger.log('Starting SIM sync from Vinaphone API...');
 
     try {
@@ -170,11 +261,31 @@ export class SyncService {
         baseUrl,
         headers,
         dataTimeout,
+        (fetched, total, pages) =>
+          this.updateSyncStatus(
+            'syncSims',
+            'running',
+            `Đang tải SIM từ Vinaphone (${fetched}/${total}; trang ${pages})...`,
+            undefined,
+            total > 0 ? Math.round((25 * fetched) / total) : 0,
+          ),
       );
       if (allVinaSims.length === 0) {
         this.logger.warn('No SIMs returned from Vinaphone quickSearch API');
+        this.updateSyncStatus(
+          'syncSims',
+          'completed',
+          'Không có SIM cần đồng bộ.',
+        );
         return;
       }
+      this.updateSyncStatus(
+        'syncSims',
+        'running',
+        `Đã tải ${allVinaSims.length} SIM; đang tải dung lượng sử dụng...`,
+        undefined,
+        25,
+      );
 
       // Update local DB
       const now = new Date();
@@ -214,6 +325,14 @@ export class SyncService {
         const chunk = allVinaSims.slice(i, i + USAGE_BATCH_SIZE);
         const msisdns = chunk.map((s) => s.msisdn);
         const batchNum = Math.floor(i / USAGE_BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(allVinaSims.length / USAGE_BATCH_SIZE);
+        this.updateSyncStatus(
+          'syncSims',
+          'running',
+          `Đang tải dung lượng SIM (lô ${batchNum}/${totalBatches})...`,
+          undefined,
+          25 + Math.round((15 * (batchNum - 1)) / totalBatches),
+        );
         try {
           const { data: items } = await this.withRetry(
             `get-data-used batch ${batchNum}`,
@@ -239,6 +358,13 @@ export class SyncService {
             err,
           );
         }
+        this.updateSyncStatus(
+          'syncSims',
+          'running',
+          `Đã tải dung lượng SIM (lô ${batchNum}/${totalBatches})...`,
+          undefined,
+          25 + Math.round((15 * batchNum) / totalBatches),
+        );
       }
       this.logger.log(
         `Fetched usage data for ${usedDataMap.size} SIMs in ${Math.ceil(allVinaSims.length / USAGE_BATCH_SIZE)} batch(es)`,
@@ -333,11 +459,31 @@ export class SyncService {
         });
         usageUpserts.push({ phoneNumber: msisdnStr, usedMB: newUsedMB });
         processed++;
+        if (processed % 100 === 0 || processed === allVinaSims.length) {
+          this.updateSyncStatus(
+            'syncSims',
+            'running',
+            `Đang chuẩn bị dữ liệu SIM (${processed}/${allVinaSims.length})...`,
+            undefined,
+            40 + Math.round((15 * processed) / allVinaSims.length),
+          );
+        }
       }
 
       // Execute upserts in batches
       for (let i = 0; i < upserts.length; i += BATCH_SIZE) {
         const batch = upserts.slice(i, i + BATCH_SIZE);
+        this.updateSyncStatus(
+          'syncSims',
+          'running',
+          `Đang lưu SIM (${Math.min(i + batch.length, upserts.length)}/${upserts.length})...`,
+          undefined,
+          55 +
+            Math.round(
+              (15 * Math.min(i + batch.length, upserts.length)) /
+                upserts.length,
+            ),
+        );
         await this.prisma.$transaction(
           batch.map(({ phoneNumber, data, createExtra }) =>
             this.prisma.sim.upsert({
@@ -370,6 +516,17 @@ export class SyncService {
       // Upsert usage history in batches
       for (let i = 0; i < usageUpserts.length; i += BATCH_SIZE) {
         const batch = usageUpserts.slice(i, i + BATCH_SIZE);
+        this.updateSyncStatus(
+          'syncSims',
+          'running',
+          `Đang lưu lịch sử dung lượng (${Math.min(i + batch.length, usageUpserts.length)}/${usageUpserts.length})...`,
+          undefined,
+          70 +
+            Math.round(
+              (10 * Math.min(i + batch.length, usageUpserts.length)) /
+                usageUpserts.length,
+            ),
+        );
         const batchWithIds = batch
           .map(({ phoneNumber, usedMB }) => ({
             simId: simIdMap.get(phoneNumber),
@@ -391,6 +548,13 @@ export class SyncService {
         .map(({ phoneNumber }) => simIdMap.get(phoneNumber))
         .filter((simId): simId is string => !!simId);
 
+      this.updateSyncStatus(
+        'syncSims',
+        'running',
+        'Đang cập nhật các cảnh báo theo dữ liệu SIM...',
+        undefined,
+        80,
+      );
       const createdAlertChecks =
         await this.alertsService.syncTriggeredAlertsBySimIds(syncedSimIds);
       this.logger.log(
@@ -398,7 +562,15 @@ export class SyncService {
       );
 
       // Sync group members for all unique chủ nhóm groups
-      for (const [groupId, groupName] of groupsToSync) {
+      const groupEntries = Array.from(groupsToSync.entries());
+      this.updateSyncStatus(
+        'syncSims',
+        'running',
+        'Đang đồng bộ thành viên nhóm và tính lại dung lượng SIM chủ...',
+        undefined,
+        85,
+      );
+      for (const [index, [groupId, groupName]] of groupEntries.entries()) {
         await this.syncGroupMembers(
           baseUrl,
           headers,
@@ -406,14 +578,35 @@ export class SyncService {
           groupId,
           groupName,
         );
+        this.updateSyncStatus(
+          'syncSims',
+          'running',
+          `Đã đồng bộ thành viên nhóm (${index + 1}/${groupEntries.length})...`,
+          undefined,
+          85 +
+            Math.round((10 * (index + 1)) / Math.max(1, groupEntries.length)),
+        );
       }
 
+      this.updateSyncStatus(
+        'syncSims',
+        'running',
+        'Đang tính lại dung lượng SIM chủ...',
+        undefined,
+        95,
+      );
       await this.recalculateMasterSimUsage();
       this.logger.log(
         `Sync completed: ${processed}/${allVinaSims.length} SIMs processed.`,
       );
+      this.updateSyncStatus(
+        'syncSims',
+        'completed',
+        `Đồng bộ hoàn tất: ${processed}/${allVinaSims.length} SIM.`,
+      );
     } catch (err) {
       this.logger.error('Sync failed', (err as Error).stack);
+      this.updateSyncStatus('syncSims', 'failed', 'Đồng bộ SIM thất bại.', err);
     } finally {
       this.isSyncing = false;
     }
@@ -431,87 +624,167 @@ export class SyncService {
     failed: number;
     total: number;
   }> {
-    this.logger.log('Starting monthly usage sync (detail-plan)...');
-    const dataTimeout =
-      this.configService.get<number>('vinaphone.dataTimeoutMs') ?? 120_000;
-    const currentMonth = dayjs().format('YYYY-MM');
-
-    // Get master SIM phone numbers
-    const masterSims = await this.prisma.sim.findMany({
-      select: { phoneNumber: true },
-      where: { sogIsOwner: true },
-    });
-
-    const normalSims = await this.prisma.sim.findMany({
-      select: { phoneNumber: true },
-      where: { OR: [{ sogIsOwner: false }, { sogIsOwner: null }] },
-    });
-
-    const normalMsisdns = normalSims.map((s) => Number(s.phoneNumber));
-    const masterMsisdns = masterSims.map((s) => Number(s.phoneNumber));
-
-    this.logger.log(
-      `Monthly usage sync: ${normalMsisdns.length} normal SIMs, ${masterMsisdns.length} master SIMs`,
+    this.updateSyncStatus(
+      'syncMonthlyUsage',
+      'running',
+      'Đang chuẩn bị đồng bộ dung lượng tháng...',
+      undefined,
+      0,
     );
+    try {
+      this.logger.log('Starting monthly usage sync (detail-plan)...');
+      const dataTimeout =
+        this.configService.get<number>('vinaphone.dataTimeoutMs') ?? 120_000;
+      const currentMonth = dayjs().format('YYYY-MM');
 
-    // Fetch detail-plan for normal SIMs
-    const detailPlanMap = await this.fetchAllDetailPlans(
-      normalMsisdns,
-      dataTimeout,
-    );
-    this.logger.log(
-      `Fetched detail-plan for ${detailPlanMap.size}/${normalMsisdns.length} normal SIMs`,
-    );
+      // Get master SIM phone numbers
+      const masterSims = await this.prisma.sim.findMany({
+        select: { phoneNumber: true },
+        where: { sogIsOwner: true },
+      });
 
-    // Fetch searchSanLuongThueBao for master SIMs
-    const masterUsageMap = await this.fetchMasterSimUsage(
-      masterMsisdns,
-      dataTimeout,
-    );
-    this.logger.log(
-      `Fetched searchSanLuongThueBao for ${masterUsageMap.size}/${masterMsisdns.length} master SIMs`,
-    );
+      const normalSims = await this.prisma.sim.findMany({
+        select: { phoneNumber: true },
+        where: { OR: [{ sogIsOwner: false }, { sogIsOwner: null }] },
+      });
 
-    // Merge both results
-    const allEntries = new Map<
-      string,
-      { dataUsedMB: number; totalData: number | null }
-    >();
-    for (const [msisdn, data] of detailPlanMap) {
-      allEntries.set(msisdn, data);
-    }
-    for (const [msisdn, data] of masterUsageMap) {
-      allEntries.set(msisdn, data);
-    }
+      const normalMsisdns = normalSims.map((s) => Number(s.phoneNumber));
+      const masterMsisdns = masterSims.map((s) => Number(s.phoneNumber));
 
-    // Upsert MonthlyDataUsage in batches
-    const monthlyEntries = Array.from(allEntries.entries());
-    for (let i = 0; i < monthlyEntries.length; i += 50) {
-      const batch = monthlyEntries.slice(i, i + 50);
-      await this.prisma.$transaction(
-        batch.map(([msisdn, { dataUsedMB, totalData }]) =>
-          this.prisma.monthlyDataUsage.upsert({
-            where: { msisdn_month: { msisdn, month: currentMonth } },
-            update: { dataUsedMB, totalData },
-            create: { msisdn, month: currentMonth, dataUsedMB, totalData },
-          }),
-        ),
+      this.logger.log(
+        `Monthly usage sync: ${normalMsisdns.length} normal SIMs, ${masterMsisdns.length} master SIMs`,
       );
-    }
-    this.logger.log(
-      `Upserted MonthlyDataUsage for ${monthlyEntries.length} SIMs`,
-    );
 
-    return {
-      success: allEntries.size,
-      failed: normalMsisdns.length + masterMsisdns.length - allEntries.size,
-      total: normalMsisdns.length + masterMsisdns.length,
-    };
+      this.updateSyncStatus(
+        'syncMonthlyUsage',
+        'running',
+        `Đang tải dung lượng cho ${normalMsisdns.length} SIM thường...`,
+        undefined,
+        0,
+      );
+      // Fetch detail-plan for normal SIMs
+      const detailPlanMap = await this.fetchAllDetailPlans(
+        normalMsisdns,
+        dataTimeout,
+        10,
+        (processed, total, success, failed) =>
+          this.updateSyncStatus(
+            'syncMonthlyUsage',
+            'running',
+            `Đang tải dung lượng SIM thường (${processed}/${total}; thành công ${success}, lỗi ${failed})...`,
+            undefined,
+            total > 0 ? Math.round((50 * processed) / total) : 0,
+          ),
+      );
+      this.logger.log(
+        `Fetched detail-plan for ${detailPlanMap.size}/${normalMsisdns.length} normal SIMs`,
+      );
+
+      this.updateSyncStatus(
+        'syncMonthlyUsage',
+        'running',
+        `Đang tải dung lượng cho ${masterMsisdns.length} SIM chủ...`,
+        undefined,
+        50,
+      );
+      // Fetch searchSanLuongThueBao for master SIMs
+      const masterUsageMap = await this.fetchMasterSimUsage(
+        masterMsisdns,
+        dataTimeout,
+        50,
+        (processed, total) =>
+          this.updateSyncStatus(
+            'syncMonthlyUsage',
+            'running',
+            `Đang tải dung lượng SIM chủ (${processed}/${total})...`,
+            undefined,
+            total > 0 ? 50 + Math.round((25 * processed) / total) : 75,
+          ),
+      );
+      this.logger.log(
+        `Fetched searchSanLuongThueBao for ${masterUsageMap.size}/${masterMsisdns.length} master SIMs`,
+      );
+      this.updateSyncStatus(
+        'syncMonthlyUsage',
+        'running',
+        `Đã tải dung lượng cho ${masterUsageMap.size} SIM chủ; đang lưu dữ liệu...`,
+        undefined,
+        75,
+      );
+
+      // Merge both results
+      const allEntries = new Map<
+        string,
+        { dataUsedMB: number; totalData: number | null }
+      >();
+      for (const [msisdn, data] of detailPlanMap) {
+        allEntries.set(msisdn, data);
+      }
+      for (const [msisdn, data] of masterUsageMap) {
+        allEntries.set(msisdn, data);
+      }
+
+      // Upsert MonthlyDataUsage in batches
+      const monthlyEntries = Array.from(allEntries.entries());
+      for (let i = 0; i < monthlyEntries.length; i += 50) {
+        const batch = monthlyEntries.slice(i, i + 50);
+        this.updateSyncStatus(
+          'syncMonthlyUsage',
+          'running',
+          `Đang lưu dữ liệu dung lượng (${Math.min(i + batch.length, monthlyEntries.length)}/${monthlyEntries.length})...`,
+          undefined,
+          75 +
+            Math.round(
+              (20 * Math.min(i + batch.length, monthlyEntries.length)) /
+                monthlyEntries.length,
+            ),
+        );
+        await this.prisma.$transaction(
+          batch.map(([msisdn, { dataUsedMB, totalData }]) =>
+            this.prisma.monthlyDataUsage.upsert({
+              where: { msisdn_month: { msisdn, month: currentMonth } },
+              update: { dataUsedMB, totalData },
+              create: { msisdn, month: currentMonth, dataUsedMB, totalData },
+            }),
+          ),
+        );
+      }
+      this.logger.log(
+        `Upserted MonthlyDataUsage for ${monthlyEntries.length} SIMs`,
+      );
+
+      const result = {
+        success: allEntries.size,
+        failed: normalMsisdns.length + masterMsisdns.length - allEntries.size,
+        total: normalMsisdns.length + masterMsisdns.length,
+      };
+      this.updateSyncStatus(
+        'syncMonthlyUsage',
+        'completed',
+        `Đồng bộ hoàn tất: ${result.success}/${result.total} SIM; ${result.failed} lỗi.`,
+      );
+      return result;
+    } catch (err) {
+      this.updateSyncStatus(
+        'syncMonthlyUsage',
+        'failed',
+        'Đồng bộ dung lượng tháng thất bại.',
+        err,
+      );
+      throw err;
+    }
   }
 
   // ─── Sync rating plans ─────────────────────────────────────────────────────
 
   async syncRatingPlans() {
+    this.updateSyncStatus(
+      'syncRatingPlans',
+      'running',
+      'Đang tải danh sách gói cước...',
+      undefined,
+      0,
+    );
     this.logger.log('Starting rating plan sync from Vinaphone API...');
     try {
       const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
@@ -525,9 +798,16 @@ export class SyncService {
         headers,
         timeout,
       );
+      this.updateSyncStatus(
+        'syncRatingPlans',
+        'running',
+        `Đã tải ${allRatingPlans.length} gói cước; đang lưu dữ liệu...`,
+        undefined,
+        30,
+      );
 
       // Upsert rating plans
-      for (const rp of allRatingPlans) {
+      for (const [index, rp] of allRatingPlans.entries()) {
         await this.prisma.ratingPlan.upsert({
           where: {
             ratingPlanId: rp.id,
@@ -540,19 +820,45 @@ export class SyncService {
             syncedAt: new Date(),
           },
         });
+        this.updateSyncStatus(
+          'syncRatingPlans',
+          'running',
+          `Đang lưu gói cước (${index + 1}/${allRatingPlans.length})...`,
+          undefined,
+          30 +
+            Math.round((65 * (index + 1)) / Math.max(1, allRatingPlans.length)),
+        );
       }
 
       this.logger.log(
         `Rating plan sync completed: ${allRatingPlans.length} plans processed.`,
       );
+      this.updateSyncStatus(
+        'syncRatingPlans',
+        'completed',
+        `Đồng bộ hoàn tất: ${allRatingPlans.length} gói cước.`,
+      );
     } catch (err) {
       this.logger.error('Rating plan sync failed', (err as Error).stack);
+      this.updateSyncStatus(
+        'syncRatingPlans',
+        'failed',
+        'Đồng bộ gói cước thất bại.',
+        err,
+      );
     }
   }
 
   // --- Sync group sims ─────────────────────────────────────────────────────
 
   async syncGroupSims() {
+    this.updateSyncStatus(
+      'syncGroupSims',
+      'running',
+      'Đang tải danh sách nhóm thuê bao...',
+      undefined,
+      0,
+    );
     this.logger.log('Starting group sim sync from Vinaphone API...');
     try {
       const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
@@ -566,9 +872,16 @@ export class SyncService {
         headers,
         timeout,
       );
+      this.updateSyncStatus(
+        'syncGroupSims',
+        'running',
+        `Đã tải ${allGroupSims.length} nhóm; đang lưu dữ liệu...`,
+        undefined,
+        30,
+      );
 
       // Upsert group sims
-      for (const gs of allGroupSims) {
+      for (const [index, gs] of allGroupSims.entries()) {
         await this.prisma.groupSim.upsert({
           where: {
             groupId: gs.id,
@@ -580,13 +893,32 @@ export class SyncService {
             groupKey: gs.groupKey,
           },
         });
+        this.updateSyncStatus(
+          'syncGroupSims',
+          'running',
+          `Đang lưu nhóm thuê bao (${index + 1}/${allGroupSims.length})...`,
+          undefined,
+          30 +
+            Math.round((65 * (index + 1)) / Math.max(1, allGroupSims.length)),
+        );
       }
 
       this.logger.log(
         `Group sim sync completed: ${allGroupSims.length} group sims processed.`,
       );
+      this.updateSyncStatus(
+        'syncGroupSims',
+        'completed',
+        `Đồng bộ hoàn tất: ${allGroupSims.length} nhóm thuê bao.`,
+      );
     } catch (err) {
       this.logger.error('Group sim sync failed', (err as Error).stack);
+      this.updateSyncStatus(
+        'syncGroupSims',
+        'failed',
+        'Đồng bộ nhóm thuê bao thất bại.',
+        err,
+      );
     }
   }
 
@@ -599,6 +931,7 @@ export class SyncService {
     baseUrl: string,
     headers: Record<string, string>,
     timeout: number,
+    onProgress?: (fetched: number, total: number, pages: number) => void,
   ): Promise<QuickSearchSimItem[]> {
     const pageSize = 10000;
     let page = 0;
@@ -625,6 +958,7 @@ export class SyncService {
       );
 
       allSims.push(...data.content);
+      onProgress?.(allSims.length, data.totalElements, page + 1);
 
       if (data.last || allSims.length >= data.totalElements) {
         break;
@@ -843,6 +1177,12 @@ export class SyncService {
     msisdns: number[],
     timeout: number,
     concurrency = 10,
+    onProgress?: (
+      processed: number,
+      total: number,
+      success: number,
+      failed: number,
+    ) => void,
   ): Promise<Map<string, { dataUsedMB: number; totalData: number | null }>> {
     const results = new Map<
       string,
@@ -894,6 +1234,7 @@ export class SyncService {
       }
 
       const processed = Math.min(i + concurrency, total);
+      onProgress?.(processed, total, successCount, failCount);
       if (processed % 50 === 0 || processed === total) {
         this.logger.log(
           `detail-plan progress: ${processed}/${total} (success: ${successCount}, failed: ${failCount})`,
@@ -924,6 +1265,7 @@ export class SyncService {
     msisdns: number[],
     timeout: number,
     batchSize = 50,
+    onProgress?: (processed: number, total: number) => void,
   ): Promise<Map<string, { dataUsedMB: number; totalData: number | null }>> {
     const results = new Map<
       string,
@@ -986,6 +1328,8 @@ export class SyncService {
           err,
         );
       }
+
+      onProgress?.(Math.min(i + batch.length, msisdns.length), msisdns.length);
 
       // Delay between batches
       if (i + batchSize < msisdns.length) {

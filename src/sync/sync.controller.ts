@@ -1,6 +1,9 @@
 import {
   Controller,
+  Get,
+  MessageEvent,
   Post,
+  Sse,
   Headers,
   UnauthorizedException,
   HttpCode,
@@ -13,8 +16,13 @@ import {
   ApiExcludeEndpoint,
 } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import { Observable, concat, interval, map, merge, of } from 'rxjs';
 import { Public } from '../auth/public.decorator';
-import { SyncService } from './sync.service';
+import {
+  SyncService,
+  type SyncJobName,
+  type SyncJobStatus,
+} from './sync.service';
 
 @ApiTags('Sync')
 @ApiBearerAuth()
@@ -24,6 +32,24 @@ export class SyncController {
     private readonly syncService: SyncService,
     private readonly configService: ConfigService,
   ) {}
+
+  @Get('status')
+  getStatus(): Record<SyncJobName, SyncJobStatus> {
+    return this.syncService.getSyncStatus();
+  }
+
+  @Sse('events')
+  getStatusEvents(): Observable<MessageEvent> {
+    return concat(
+      of({ type: 'sync-status', data: this.syncService.getSyncStatus() }),
+      merge(
+        this.syncService
+          .watchSyncStatus()
+          .pipe(map((data) => ({ type: 'sync-status', data }))),
+        interval(15_000).pipe(map(() => ({ type: 'ping', data: 'keepalive' }))),
+      ),
+    );
+  }
 
   /** Vercel Cron trigger — fires all jobs at once (requires CRON_SECRET). */
   @ApiExcludeEndpoint()
@@ -92,7 +118,7 @@ export class SyncController {
   @Post('monthly-usage')
   @HttpCode(HttpStatus.OK)
   triggerMonthlyUsage() {
-    void this.syncService.syncMonthlyUsage();
+    void this.syncService.syncMonthlyUsage().catch(() => undefined);
     return {
       triggered: true,
       job: 'syncMonthlyUsage',
