@@ -4,10 +4,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SyncService } from './sync.service';
 import { SyncController } from './sync.controller';
 import { AlertsModule } from '../alerts/alerts.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
     AlertsModule,
+    AuthModule,
     HttpModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({

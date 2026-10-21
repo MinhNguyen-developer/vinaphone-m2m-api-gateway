@@ -9,6 +9,7 @@ import { UpdateGroupDto } from './dto/update-group.dto';
 import { PaginatedResult } from 'src/types/common';
 import { Group, Prisma } from 'src/generated/prisma';
 import { QueryGroupDto } from './dto/query-group.dto';
+import { getCurrentAccountId } from '../prisma/tenant-context';
 
 @Injectable()
 export class GroupsService {
@@ -26,9 +27,10 @@ export class GroupsService {
 
     // totalUsedMB is a computed aggregate — requires raw SQL for correct pagination
     if (sortField === 'totalUsedMB') {
+      const accountId = getCurrentAccountId();
       const searchFilter = search
-        ? Prisma.sql`WHERE g.name ILIKE ${`%${search}%`}`
-        : Prisma.sql``;
+        ? Prisma.sql`WHERE g.account_id = ${accountId} AND g.name ILIKE ${`%${search}%`}`
+        : Prisma.sql`WHERE g.account_id = ${accountId}`;
       const direction = sortDir === 'desc' ? Prisma.sql`DESC` : Prisma.sql`ASC`;
       const offset = (page - 1) * pageSize;
 

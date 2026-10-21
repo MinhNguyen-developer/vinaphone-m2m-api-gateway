@@ -1,7 +1,9 @@
 import { AlertsService } from './alerts.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { runWithTenant } from '../prisma/tenant-context';
 
 describe('AlertsService', () => {
+  const accountId = '0f6462cc-2e64-4f50-931b-4e379023ad14';
   let service: AlertsService;
   let prisma: {
     alertConfig: {
@@ -83,7 +85,9 @@ describe('AlertsService', () => {
     });
 
     await expect(
-      (service as any).syncTriggeredAlertsBySimIds(['sim-1']),
+      runWithTenant(accountId, () =>
+        (service as any).syncTriggeredAlertsBySimIds(['sim-1']),
+      ),
     ).resolves.toBe(1);
 
     expect(prisma.alertConfig.findMany).toHaveBeenCalledWith({
@@ -145,7 +149,9 @@ describe('AlertsService', () => {
     });
 
     await expect(
-      (service as any).syncTriggeredAlertsBySimIds(['sim-1']),
+      runWithTenant(accountId, () =>
+        (service as any).syncTriggeredAlertsBySimIds(['sim-1']),
+      ),
     ).resolves.toBe(0);
 
     expect(prisma.alertCheck.create).not.toHaveBeenCalled();
@@ -206,7 +212,9 @@ describe('AlertsService', () => {
     });
 
     await expect(
-      (service as any).syncTriggeredAlertsBySimIds(['sim-1']),
+      runWithTenant(accountId, () =>
+        (service as any).syncTriggeredAlertsBySimIds(['sim-1']),
+      ),
     ).resolves.toBe(2);
 
     expect(prisma.alertCheck.create).toHaveBeenCalledTimes(2);

@@ -14,10 +14,41 @@ datasource db {
 // Models
 // ─────────────────────────────────────────────
 
+model Account {
+  id                       String    @id @default(uuid()) @db.Uuid
+  email                    String?   @unique @db.VarChar(255)
+  passwordHash             String?   @map("password_hash") @db.Text
+  vinaphoneTokenCiphertext String?   @map("vinaphone_token_ciphertext") @db.Text
+  vinaphoneTokenIv         String?   @map("vinaphone_token_iv") @db.VarChar(64)
+  vinaphoneTokenTag        String?   @map("vinaphone_token_tag") @db.VarChar(64)
+  tokenExpiresAt           DateTime? @map("token_expires_at") @db.Timestamptz(3)
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sims              Sim[]
+  usageHistory      UsageHistory[]
+  simCodes          SimCode[]
+  masterSims        MasterSim[]
+  groups            Group[]
+  groupSims         GroupSim[]
+  simGroups         SimGroup[]
+  alertConfigs      AlertConfig[]
+  alertChecks       AlertCheck[]
+  simGroupMembers   SimGroupMember[]
+  ratingPlans       RatingPlan[]
+  customers         Customer[]
+  contracts         Contract[]
+  monthlyDataUsages MonthlyDataUsage[]
+  syncJobStates     SyncJobState[]
+
+  @@map("accounts")
+}
+
 model Sim {
   id              String    @id @default(uuid()) @db.Uuid
-  phoneNumber     String    @unique @map("phone_number") @db.VarChar(15)
-  imsi            String?   @unique @db.VarChar(15)
+  accountId       String    @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
+  phoneNumber     String    @map("phone_number") @db.VarChar(15)
+  imsi            String?   @db.VarChar(15)
   internalImsi    String?   @map("internal_imsi") @db.VarChar(10)
   contractCode    String?   @map("contract_code") @db.VarChar(50)
   productCode     String    @map("product_code") @db.VarChar(50)
@@ -62,56 +93,72 @@ model Sim {
 
   simCodeLabel String? @map("sim_code_id") @db.VarChar(50)
 
+  account           Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
   usageHistory      UsageHistory[]
   simGroups         SimGroup[]
   alertChecks       AlertCheck[]
   alertConfigs      AlertConfig[]
   contracts         Contract[]         @relation("ContractSims")
   monthlyDataUsages MonthlyDataUsage[]
-  ratingPlan        RatingPlan?        @relation(fields: [ratingPlanId], references: [ratingPlanId], onDelete: SetNull)
-  simCode           SimCode?           @relation(fields: [simCodeLabel], references: [code], onDelete: SetNull)
+  ratingPlan        RatingPlan?        @relation(fields: [accountId, ratingPlanId], references: [accountId, ratingPlanId], onDelete: Restrict)
+  simCode           SimCode?           @relation(fields: [accountId, simCodeLabel], references: [accountId, code], onDelete: Restrict)
 
+  @@unique([accountId, id])
+  @@unique([accountId, phoneNumber])
+  @@unique([accountId, imsi])
   @@map("sims")
 }
 
 model UsageHistory {
-  id     String @id @default(uuid()) @db.Uuid
-  simId  String @map("sim_id") @db.Uuid
-  month  String @db.Char(7)
-  usedMB Int    @default(0) @map("used_mb")
+  id        String @id @default(uuid()) @db.Uuid
+  accountId String @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
+  simId     String @map("sim_id") @db.Uuid
+  month     String @db.Char(7)
+  usedMB    Int    @default(0) @map("used_mb")
 
-  sim Sim @relation(fields: [simId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sim     Sim     @relation(fields: [accountId, simId], references: [accountId, id], onDelete: Cascade)
 
-  @@unique([simId, month])
+  @@unique([accountId, simId, month])
   @@map("usage_history")
 }
 
 model SimCode {
   id          String   @id @default(uuid()) @db.Uuid
-  code        String   @unique @db.VarChar(50)
+  accountId   String   @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
+  code        String   @db.VarChar(50)
   description String?  @db.Text
   createdAt   DateTime @default(now()) @map("created_at")
 
-  sims Sim[]
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sims    Sim[]
 
+  @@unique([accountId, id])
+  @@unique([accountId, code])
   @@map("sim_codes")
 }
 
 model MasterSim {
   id                String    @id @default(uuid()) @db.Uuid
-  code              String    @unique @db.VarChar(20)
-  phoneNumber       String    @unique @map("phone_number") @db.VarChar(15)
+  accountId         String    @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
+  code              String    @db.VarChar(20)
+  phoneNumber       String    @map("phone_number") @db.VarChar(15)
   packageName       String    @map("package_name") @db.VarChar(100)
   packageCapacityMB Int       @map("package_capacity_mb")
   usedMB            Int       @default(0) @map("used_mb")
   description       String?   @db.Text
   syncedAt          DateTime? @map("synced_at")
 
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, code])
+  @@unique([accountId, phoneNumber])
   @@map("master_sims")
 }
 
 model Group {
   id          String   @id @default(uuid()) @db.Uuid
+  accountId   String   @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
   name        String   @db.VarChar(100)
   description String?  @db.Text
   createdAt   DateTime @default(dbgenerated("CURRENT_DATE")) @map("created_at") @db.Date
@@ -119,29 +166,41 @@ model Group {
   simGroups    SimGroup[]
   alertConfigs AlertConfig[]
 
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, id])
   @@map("groups")
 }
 
 model GroupSim {
-  id       String @id @default(uuid()) @db.Uuid
-  groupId  Int    @unique @map("group_id") @db.Integer
-  name     String @map("name") @db.VarChar(100)
-  groupKey String @unique @map("group_key") @db.VarChar(50)
+  id        String @id @default(uuid()) @db.Uuid
+  accountId String @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
+  groupId   Int    @map("group_id") @db.Integer
+  name      String @map("name") @db.VarChar(100)
+  groupKey  String @map("group_key") @db.VarChar(50)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, groupId])
+  @@unique([accountId, groupKey])
 }
 
 model SimGroup {
-  simId   String @map("sim_id") @db.Uuid
-  groupId String @map("group_id") @db.Uuid
+  accountId String @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
+  simId     String @map("sim_id") @db.Uuid
+  groupId   String @map("group_id") @db.Uuid
 
-  sim   Sim   @relation(fields: [simId], references: [id], onDelete: Cascade)
-  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sim     Sim     @relation(fields: [accountId, simId], references: [accountId, id], onDelete: Cascade)
+  group   Group   @relation(fields: [accountId, groupId], references: [accountId, id], onDelete: Cascade)
 
-  @@id([simId, groupId])
+  @@id([accountId, simId, groupId])
   @@map("sim_groups")
 }
 
 model AlertConfig {
   id           String   @id @default(uuid()) @db.Uuid
+  accountId    String   @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
   label        String   @db.VarChar(200)
   thresholdMB  Int      @map("threshold_mb")
   simId        String?  @map("sim_id") @db.Uuid
@@ -153,15 +212,18 @@ model AlertConfig {
   status       Int      @default(1)
   createdAt    DateTime @default(now()) @map("created_at")
 
-  sim         Sim?         @relation(fields: [simId], references: [id], onDelete: Cascade)
-  group       Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sim         Sim?         @relation(fields: [accountId, simId], references: [accountId, id], onDelete: Cascade)
+  group       Group?       @relation(fields: [accountId, groupId], references: [accountId, id], onDelete: Cascade)
   alertChecks AlertCheck[]
 
+  @@unique([accountId, id])
   @@map("alert_configs")
 }
 
 model AlertCheck {
   id          String    @id @default(uuid()) @db.Uuid
+  accountId   String    @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
   simId       String    @map("sim_id") @db.Uuid
   alertId     String    @map("alert_id") @db.Uuid
   checked     Boolean   @default(false)
@@ -169,52 +231,68 @@ model AlertCheck {
   checkedAt   DateTime? @map("checked_at")
   checkedBy   String?   @map("checked_by") @db.VarChar(100)
 
-  sim   Sim         @relation(fields: [simId], references: [id], onDelete: Cascade)
-  alert AlertConfig @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  account Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sim     Sim         @relation(fields: [accountId, simId], references: [accountId, id], onDelete: Cascade)
+  alert   AlertConfig @relation(fields: [accountId, alertId], references: [accountId, id], onDelete: Cascade)
 
-  @@unique([simId, alertId])
+  @@unique([accountId, id])
+  @@unique([accountId, simId, alertId])
   @@map("alert_checks")
 }
 
 // Thành viên trong nhóm gói cước của Vinaphone (cached từ API memberOfGr)
 model SimGroupMember {
   id             String    @id @default(uuid()) @db.Uuid
+  accountId      String    @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
   groupId        String    @map("group_id") @db.VarChar(50)
   msisdn         String    @db.VarChar(15)
   ratingPlanName String?   @map("rating_plan_name") @db.VarChar(255)
   status         Int?
   syncedAt       DateTime? @map("synced_at")
 
-  @@unique([groupId, msisdn])
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, groupId, msisdn])
   @@map("sim_group_members")
 }
 
 model RatingPlan {
   id           String    @id @default(uuid()) @db.Uuid
-  ratingPlanId Int       @unique @map("rating_plan_id") @db.Integer
-  code         String    @unique @db.VarChar(50)
+  accountId    String    @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
+  ratingPlanId Int       @map("rating_plan_id") @db.Integer
+  code         String    @db.VarChar(50)
   name         String    @db.VarChar(255)
   syncedAt     DateTime? @map("synced_at")
 
-  sims Sim[]
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sims    Sim[]
 
+  @@unique([accountId, id])
+  @@unique([accountId, ratingPlanId])
+  @@unique([accountId, code])
   @@map("rating_plans")
 }
 
 model Customer {
   id           String     @id @default(uuid()) @db.Uuid
+  accountId    String     @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
   customerName String     @map("customer_name") @db.VarChar(255)
-  customerCode String     @unique @map("customer_code") @db.VarChar(100)
+  customerCode String     @map("customer_code") @db.VarChar(100)
   syncedAt     DateTime?  @map("synced_at")
   contracts    Contract[]
 
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, id])
+  @@unique([accountId, customerCode])
   @@map("customers")
 }
 
 model Contract {
   id             String    @id @default(uuid()) @db.Uuid
-  contractId     Int       @unique @map("contract_id") @db.Integer
-  contractCode   String    @unique @map("contract_code") @db.VarChar(50)
+  accountId      String    @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
+  contractId     Int       @map("contract_id") @db.Integer
+  contractCode   String    @map("contract_code") @db.VarChar(50)
   contractDate   DateTime? @map("contract_date") @db.Date
   syncedAt       DateTime? @map("synced_at")
   contractor     String?   @map("contractor") @db.VarChar(50)
@@ -230,13 +308,18 @@ model Contract {
 
   // Quan hệ với Sim (1 contract có thể có nhiều sim)
   sims     Sim[]     @relation("ContractSims")
-  customer Customer? @relation(fields: [customerCode], references: [customerCode], onDelete: SetNull)
+  account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [accountId, customerCode], references: [accountId, customerCode], onDelete: Restrict)
 
+  @@unique([accountId, id])
+  @@unique([accountId, contractId])
+  @@unique([accountId, contractCode])
   @@map("contracts")
 }
 
 model MonthlyDataUsage {
   id                String @id @default(uuid()) @db.Uuid
+  accountId         String @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
   msisdn            String @db.VarChar(15)
   month             String @db.Char(7) // "YYYY-MM"
   smsNoiMangUsed    Int?   @map("sms_noi_mang_used")
@@ -248,8 +331,25 @@ model MonthlyDataUsage {
   totalSmsNgoaiMang Int?   @map("total_sms_ngoai_mang")
   totalSmsQuocTe    Int?   @map("total_sms_quoc_te_used")
 
-  sim Sim @relation(fields: [msisdn], references: [phoneNumber], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sim     Sim     @relation(fields: [accountId, msisdn], references: [accountId, phoneNumber], onDelete: Cascade)
 
-  @@unique([msisdn, month])
+  @@unique([accountId, msisdn, month])
   @@map("monthly_data_usage")
+}
+
+model SyncJobState {
+  accountId       String    @default(dbgenerated("'0f6462cc-2e64-4f50-931b-4e379023ad14'::uuid")) @map("account_id") @db.Uuid
+  job             String    @db.VarChar(50)
+  state           String    @default("idle") @db.VarChar(20)
+  progress        String    @default("") @db.Text
+  progressPercent Int       @default(0) @map("progress_percent")
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+  lastSyncedAt    DateTime? @map("last_synced_at") @db.Timestamptz(3)
+  error           String?   @db.Text
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@id([accountId, job])
+  @@map("sync_job_states")
 }
