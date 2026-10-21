@@ -12,8 +12,8 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Đăng nhập, nhận JWT token' })
-  @ApiResponse({ status: 200, description: 'Trả về access_token' })
+  @ApiOperation({ summary: 'Đăng nhập Vinaphone, nhận JWT nội bộ' })
+  @ApiResponse({ status: 200, description: 'Trả về token nội bộ access_token' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);

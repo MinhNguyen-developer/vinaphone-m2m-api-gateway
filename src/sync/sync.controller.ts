@@ -5,6 +5,7 @@ import {
   Post,
   Sse,
   Headers,
+  Request,
   UnauthorizedException,
   HttpCode,
   HttpStatus,
@@ -16,7 +17,7 @@ import {
   ApiExcludeEndpoint,
 } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
-import { Observable, concat, interval, map, merge, of } from 'rxjs';
+import { Observable, concat, from, interval, map, merge } from 'rxjs';
 import { Public } from '../auth/public.decorator';
 import {
   SyncService,
@@ -34,39 +35,38 @@ export class SyncController {
   ) {}
 
   @Get('status')
-  getStatus(): Record<SyncJobName, SyncJobStatus> {
-    return this.syncService.getSyncStatus();
+  getStatus(@Request() req: { user: { accountId: string } }): Promise<Record<SyncJobName, SyncJobStatus>> {
+    return this.syncService.getSyncStatus(req.user.accountId);
   }
 
   @Sse('events')
-  getStatusEvents(): Observable<MessageEvent> {
+  getStatusEvents(@Request() req: { user: { accountId: string } }): Observable<MessageEvent> {
+    const accountId = req.user.accountId;
     return concat(
-      of({ type: 'sync-status', data: this.syncService.getSyncStatus() }),
+      from(this.syncService.getSyncStatus(accountId)).pipe(
+        map((data) => ({ type: 'sync-status', data })),
+      ),
       merge(
         this.syncService
-          .watchSyncStatus()
+          .watchSyncStatus(accountId)
           .pipe(map((data) => ({ type: 'sync-status', data }))),
         interval(15_000).pipe(map(() => ({ type: 'ping', data: 'keepalive' }))),
       ),
     );
   }
 
-  /** Vercel Cron trigger — fires all jobs at once (requires CRON_SECRET). */
+  /** Dispatch all eligible accounts sequentially (requires CRON_SECRET). */
   @ApiExcludeEndpoint()
   @Public()
   @Post('trigger')
   @HttpCode(HttpStatus.OK)
   async trigger(@Headers('authorization') authHeader: string) {
     const secret = this.configService.get<string>('cronSecret');
-    if (secret) {
-      if (authHeader !== `Bearer ${secret}`) {
-        throw new UnauthorizedException('Invalid cron secret');
-      }
+    if (!secret || authHeader !== `Bearer ${secret}`) {
+      throw new UnauthorizedException('Invalid cron secret');
     }
 
-    void this.syncService.syncSims();
-    void this.syncService.syncRatingPlans();
-    void this.syncService.syncGroupSims();
+    void this.syncService.syncEligibleAccounts().catch(() => undefined);
 
     return { triggered: true, timestamp: new Date().toISOString() };
   }
@@ -75,8 +75,8 @@ export class SyncController {
   @ApiOperation({ summary: 'Trigger SIM sync from Vinaphone API' })
   @Post('sims')
   @HttpCode(HttpStatus.OK)
-  triggerSims() {
-    void this.syncService.syncSims();
+  triggerSims(@Request() req: { user: { accountId: string } }) {
+    void this.syncService.syncSims(req.user.accountId);
     return {
       triggered: true,
       job: 'syncSims',
@@ -88,8 +88,8 @@ export class SyncController {
   @ApiOperation({ summary: 'Trigger rating plan sync from Vinaphone API' })
   @Post('rating-plans')
   @HttpCode(HttpStatus.OK)
-  triggerRatingPlans() {
-    void this.syncService.syncRatingPlans();
+  triggerRatingPlans(@Request() req: { user: { accountId: string } }) {
+    void this.syncService.syncRatingPlans(req.user.accountId);
     return {
       triggered: true,
       job: 'syncRatingPlans',
@@ -101,8 +101,8 @@ export class SyncController {
   @ApiOperation({ summary: 'Trigger group SIM sync from Vinaphone API' })
   @Post('group-sims')
   @HttpCode(HttpStatus.OK)
-  triggerGroupSims() {
-    void this.syncService.syncGroupSims();
+  triggerGroupSims(@Request() req: { user: { accountId: string } }) {
+    void this.syncService.syncGroupSims(req.user.accountId);
     return {
       triggered: true,
       job: 'syncGroupSims',
@@ -117,8 +117,10 @@ export class SyncController {
   })
   @Post('monthly-usage')
   @HttpCode(HttpStatus.OK)
-  triggerMonthlyUsage() {
-    void this.syncService.syncMonthlyUsage().catch(() => undefined);
+  triggerMonthlyUsage(@Request() req: { user: { accountId: string } }) {
+    void this.syncService
+      .syncMonthlyUsage(req.user.accountId)
+      .catch(() => undefined);
     return {
       triggered: true,
       job: 'syncMonthlyUsage',

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Sim } from '../generated/prisma/index.js';
 import { PrismaService } from '../prisma/prisma.service';
+import { getCurrentAccountId } from '../prisma/tenant-context';
 import { UpdateAlertCheckDto } from './dto/update-alert-check.dto';
 import { CreateAlertDto } from './dto/create-alert.dto';
 import { UpdateAlertDto } from './dto/update-alert.dto';
@@ -65,7 +66,13 @@ export class AlertsService {
     check: { checked: boolean; triggeredAt: Date | null };
   }> {
     let check = await this.prisma.alertCheck.findUnique({
-      where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
+      where: {
+        accountId_simId_alertId: {
+          accountId: getCurrentAccountId(),
+          simId: sim.id,
+          alertId: alert.id,
+        },
+      },
     });
 
     let created = false;
@@ -84,7 +91,13 @@ export class AlertsService {
       created = true;
     } else if (!check.checked && !check.triggeredAt) {
       check = await this.prisma.alertCheck.update({
-        where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
+        where: {
+          accountId_simId_alertId: {
+            accountId: getCurrentAccountId(),
+            simId: sim.id,
+            alertId: alert.id,
+          },
+        },
         data: { triggeredAt: new Date() },
       });
     }
@@ -342,7 +355,13 @@ export class AlertsService {
         if (!scopeMatch) continue;
 
         await this.prisma.alertCheck.upsert({
-          where: { simId_alertId: { simId: sim.id, alertId: alert.id } },
+          where: {
+            accountId_simId_alertId: {
+              accountId: getCurrentAccountId(),
+              simId: sim.id,
+              alertId: alert.id,
+            },
+          },
           update: {
             checked: true,
             checkedAt: new Date(),
@@ -405,7 +424,13 @@ export class AlertsService {
       throw new NotFoundException(`AlertConfig ${alertId} không tồn tại`);
 
     return this.prisma.alertCheck.upsert({
-      where: { simId_alertId: { simId, alertId } },
+      where: {
+        accountId_simId_alertId: {
+          accountId: getCurrentAccountId(),
+          simId,
+          alertId,
+        },
+      },
       update: {
         checked: dto.checked,
         checkedAt: dto.checked ? new Date() : null,

@@ -1,13 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { Observable, Subject, firstValueFrom } from 'rxjs';
+import { Observable, Subject, filter, firstValueFrom, map } from 'rxjs';
 import dayjs from 'dayjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { SimStatus } from '../types/common';
 import { AlertsService } from '../alerts/alerts.service';
+import { AuthService } from '../auth/auth.service';
+import { getCurrentAccountId, runWithTenant } from '../prisma/tenant-context';
 import type {
-  VinaphoneLoginResponse,
   QuickSearchSimItem,
   SogItem,
   MemberOfGrResponse,
@@ -78,43 +79,28 @@ export interface SyncJobStatus {
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
 
-  private cachedToken: string | null = null;
-  private tokenExpiresAt = 0; // Unix timestamp (seconds)
-  private isSyncing = false; // guard against overlapping runs
-  private readonly syncStatusSubject = new Subject<
+  private readonly syncJobsByAccount = new Map<
+    string,
     Record<SyncJobName, SyncJobStatus>
   >();
-  private readonly syncJobs: Record<SyncJobName, SyncJobStatus> = {
-    syncSims: this.initialSyncStatus(),
-    syncRatingPlans: this.initialSyncStatus(),
-    syncGroupSims: this.initialSyncStatus(),
-    syncMonthlyUsage: this.initialSyncStatus(),
-  };
+  private readonly loadedAccounts = new Set<string>();
+  private readonly statusLoads = new Map<string, Promise<void>>();
+  private readonly statusWriteChains = new Map<string, Promise<boolean>>();
+  private readonly lastStatusWriteAt = new Map<string, number>();
+  private readonly activeAccounts = new Set<string>();
+  private readonly activeTokens = new Map<string, string>();
+  private readonly syncStatusSubject = new Subject<{
+    accountId: string;
+    status: Record<SyncJobName, SyncJobStatus>;
+  }>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
     private readonly alertsService: AlertsService,
+    private readonly authService: AuthService,
   ) {}
-
-  getSyncStatus(): Record<SyncJobName, SyncJobStatus> {
-    const includeErrors =
-      this.configService.get<string>('nodeEnv') === 'development';
-    return Object.fromEntries(
-      Object.entries(this.syncJobs).map(([job, status]) => [
-        job,
-        {
-          ...status,
-          ...(!includeErrors ? { error: undefined } : {}),
-        },
-      ]),
-    ) as Record<SyncJobName, SyncJobStatus>;
-  }
-
-  watchSyncStatus(): Observable<Record<SyncJobName, SyncJobStatus>> {
-    return this.syncStatusSubject.asObservable();
-  }
 
   private initialSyncStatus(): SyncJobStatus {
     return {
@@ -125,20 +111,97 @@ export class SyncService {
     };
   }
 
+  private getAccountJobs(accountId: string) {
+    let jobs = this.syncJobsByAccount.get(accountId);
+    if (!jobs) {
+      jobs = {
+        syncSims: this.initialSyncStatus(),
+        syncRatingPlans: this.initialSyncStatus(),
+        syncGroupSims: this.initialSyncStatus(),
+        syncMonthlyUsage: this.initialSyncStatus(),
+      };
+      this.syncJobsByAccount.set(accountId, jobs);
+    }
+    return jobs;
+  }
+
+  private async ensureSyncStatusLoaded(accountId: string): Promise<void> {
+    if (this.loadedAccounts.has(accountId)) return;
+    let load = this.statusLoads.get(accountId);
+    if (!load) {
+      load = runWithTenant(accountId, async () => {
+        try {
+          const persisted = await this.prisma.syncJobState.findMany();
+          const jobs = this.getAccountJobs(accountId);
+          for (const row of persisted) {
+            if (!Object.hasOwn(jobs, row.job)) continue;
+            jobs[row.job as SyncJobName] = {
+              state: row.state as SyncJobStatus['state'],
+              progress: row.progress,
+              progressPercent: row.progressPercent,
+              updatedAt: row.updatedAt.toISOString(),
+              ...(row.lastSyncedAt
+                ? { lastSyncedAt: row.lastSyncedAt.toISOString() }
+                : {}),
+              ...(row.error ? { error: row.error } : {}),
+            };
+          }
+        } catch (err) {
+          this.logger.error(
+            'Failed to restore persisted sync status',
+            err instanceof Error ? err.stack : String(err),
+          );
+        }
+        this.loadedAccounts.add(accountId);
+      });
+      this.statusLoads.set(accountId, load);
+    }
+    await load;
+  }
+
+  async getSyncStatus(accountId: string): Promise<Record<SyncJobName, SyncJobStatus>> {
+    await this.ensureSyncStatusLoaded(accountId);
+    return this.getSyncStatusSnapshot(accountId);
+  }
+
+  private getSyncStatusSnapshot(accountId: string): Record<SyncJobName, SyncJobStatus> {
+    const includeErrors =
+      this.configService.get<string>('nodeEnv') === 'development';
+    return Object.fromEntries(
+      Object.entries(this.getAccountJobs(accountId)).map(([job, status]) => [
+        job,
+        {
+          ...status,
+          ...(!includeErrors ? { error: undefined } : {}),
+        },
+      ]),
+    ) as Record<SyncJobName, SyncJobStatus>;
+  }
+
+  watchSyncStatus(accountId: string): Observable<Record<SyncJobName, SyncJobStatus>> {
+    return this.syncStatusSubject.asObservable().pipe(
+      filter((event) => event.accountId === accountId),
+      map((event) => event.status),
+    );
+  }
+
   private updateSyncStatus(
     job: SyncJobName,
     state: SyncJobStatus['state'],
     progress: string,
     error?: unknown,
     progressPercent?: number,
-  ) {
+    lastSyncedAt?: string,
+  ): Promise<boolean> {
+    const accountId = getCurrentAccountId();
     const updatedAt = new Date().toISOString();
-    const currentStatus = this.syncJobs[job];
+    const jobs = this.getAccountJobs(accountId);
+    const currentStatus = jobs[job];
     const details =
       state === 'failed' && error instanceof Error
         ? { error: error.message }
         : {};
-    this.syncJobs[job] = {
+    const nextStatus: SyncJobStatus = {
       state,
       progress,
       progressPercent:
@@ -146,8 +209,8 @@ export class SyncService {
           ? 100
           : (progressPercent ?? currentStatus.progressPercent),
       updatedAt,
-      ...(state === 'completed'
-        ? { lastSyncedAt: updatedAt }
+      ...(lastSyncedAt
+        ? { lastSyncedAt }
         : currentStatus.lastSyncedAt
           ? { lastSyncedAt: currentStatus.lastSyncedAt }
           : {}),
@@ -155,42 +218,152 @@ export class SyncService {
         ? details
         : {}),
     };
-    this.syncStatusSubject.next(this.getSyncStatus());
+    jobs[job] = nextStatus;
+    this.syncStatusSubject.next({
+      accountId,
+      status: this.getSyncStatusSnapshot(accountId),
+    });
+
+    const force =
+      state !== currentStatus.state ||
+      state === 'completed' ||
+      state === 'failed' ||
+      Boolean(lastSyncedAt);
+    return this.persistSyncStatus(accountId, job, nextStatus, force).then(
+      (persisted) => {
+        if (!persisted && lastSyncedAt) {
+          const { lastSyncedAt: _discarded, ...withoutNewSyncAt } = jobs[job];
+          jobs[job] = {
+            ...withoutNewSyncAt,
+            ...(currentStatus.lastSyncedAt
+              ? { lastSyncedAt: currentStatus.lastSyncedAt }
+              : {}),
+          };
+          this.syncStatusSubject.next({
+            accountId,
+            status: this.getSyncStatusSnapshot(accountId),
+          });
+        }
+        return persisted;
+      },
+    );
+  }
+
+  private async completeSync(job: SyncJobName, progress: string) {
+    const completedAt = new Date();
+    const saved = await this.updateSyncStatus(
+      job,
+      'completed',
+      progress,
+      undefined,
+      100,
+      completedAt.toISOString(),
+    );
+    if (!saved) {
+      this.logger.error(`Sync ${job} completed but its state could not be persisted`);
+    }
+  }
+
+  private async persistSyncStatus(
+    accountId: string,
+    job: SyncJobName,
+    status: SyncJobStatus,
+    force: boolean,
+  ): Promise<boolean> {
+    const key = `${accountId}:${job}`;
+    const now = Date.now();
+    const previous = this.statusWriteChains.get(key);
+    if (!force && now - (this.lastStatusWriteAt.get(key) ?? 0) < 1000) {
+      return previous ?? Promise.resolve(true);
+    }
+    this.lastStatusWriteAt.set(key, now);
+    const nextWrite = (previous ?? Promise.resolve(true)).then(async () => {
+      try {
+        await runWithTenant(accountId, () =>
+          this.prisma.syncJobState.upsert({
+            where: { accountId_job: { accountId, job } },
+            create: {
+              accountId,
+              job,
+              state: status.state,
+              progress: status.progress,
+              progressPercent: status.progressPercent,
+              updatedAt: new Date(status.updatedAt),
+              lastSyncedAt: status.lastSyncedAt
+                ? new Date(status.lastSyncedAt)
+                : null,
+              error: status.error ?? null,
+            },
+            update: {
+              state: status.state,
+              progress: status.progress,
+              progressPercent: status.progressPercent,
+              updatedAt: new Date(status.updatedAt),
+              ...(status.lastSyncedAt
+                ? { lastSyncedAt: new Date(status.lastSyncedAt) }
+                : {}),
+              error: status.error ?? null,
+            },
+          }),
+        );
+        return true;
+      } catch (err) {
+        this.logger.error(
+          `Failed to persist sync status for ${job}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+        return false;
+      }
+    });
+    this.statusWriteChains.set(key, nextWrite);
+    return nextWrite;
+  }
+
+  private async runInTenant<T>(
+    accountId: string,
+    work: () => Promise<T>,
+  ): Promise<T | undefined> {
+    return runWithTenant(accountId, async () => {
+      await this.ensureSyncStatusLoaded(accountId);
+      if (this.activeAccounts.has(accountId)) {
+        this.logger.warn(`Sync already in progress for account ${accountId}`);
+        return undefined;
+      }
+      this.activeAccounts.add(accountId);
+      try {
+        return await work();
+      } finally {
+        this.activeAccounts.delete(accountId);
+        this.activeTokens.delete(accountId);
+      }
+    });
+  }
+
+  async syncEligibleAccounts(): Promise<void> {
+    const accountIds = await this.authService.getEligibleAccountIds();
+    for (const accountId of accountIds) {
+      const plansReady = await this.syncRatingPlans(accountId);
+      if (plansReady === false) continue;
+      await this.syncSims(accountId, true);
+      await this.syncGroupSims(accountId);
+    }
   }
 
   // ─── Token management ──────────────────────────────────────────────────────
 
   private async getToken(): Promise<string> {
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (this.cachedToken && nowSec < this.tokenExpiresAt - 60) {
-      return this.cachedToken;
-    }
+    const accountId = getCurrentAccountId();
+    const cachedToken = this.activeTokens.get(accountId);
+    if (cachedToken) return cachedToken;
 
-    const baseUrl = this.configService.get<string>('vinaphone.baseUrl')!;
-    const email = this.configService.get<string>('vinaphone.email');
-    const password = this.configService.get<string>('vinaphone.password');
-
-    if (!email || !password) {
-      throw new Error(
-        'Vinaphone credentials not configured. Set VINAPHONE_API_EMAIL and VINAPHONE_API_PASSWORD in .env',
+    const token = await this.authService.getValidVinaphoneToken(accountId);
+    if (!token) {
+      throw new UnauthorizedException(
+        'Token Vinaphone đã hết hạn; hãy đăng nhập lại.',
       );
     }
-
-    const loginUrl = `${baseUrl}/auth/token`;
-    this.logger.log(`Authenticating at ${loginUrl}`);
-
-    const { data } = await firstValueFrom(
-      this.httpService.post<VinaphoneLoginResponse>(loginUrl, {
-        email,
-        password,
-        rememberMe: true,
-      }),
-    );
-
-    this.cachedToken = data.id_token;
-    this.tokenExpiresAt = data.exp;
-    this.logger.log('Vinaphone token refreshed');
-    return this.cachedToken;
+    this.activeTokens.set(accountId, token);
+    return token;
   }
 
   private authHeaders(token: string) {
@@ -231,13 +404,33 @@ export class SyncService {
 
   // ─── Sync entry point ──────────────────────────────────────────────────────
 
-  async syncSims() {
-    if (this.isSyncing) {
-      this.logger.warn('Sync already in progress — skipping this cron tick');
-      return;
-    }
-    this.isSyncing = true;
-    this.updateSyncStatus(
+  async syncSims(
+    accountId: string,
+    ratingPlansReady = false,
+  ): Promise<void | undefined> {
+    return this.runInTenant(accountId, async () => {
+      if (!ratingPlansReady && (await this.prisma.ratingPlan.count()) === 0) {
+        const plansSynced = await this.syncRatingPlansInTenant();
+        if (!plansSynced) {
+          const error = new Error(
+            'SIM sync skipped because rating plans could not be synced.',
+          );
+          await this.updateSyncStatus(
+            'syncSims',
+            'failed',
+            'Không thể đồng bộ SIM vì chưa tải được gói cước.',
+            error,
+            0,
+          );
+          return;
+        }
+      }
+      return this.syncSimsInTenant();
+    });
+  }
+
+  private async syncSimsInTenant() {
+    await this.updateSyncStatus(
       'syncSims',
       'running',
       'SIM dữ liệu đang được tải...',
@@ -272,11 +465,7 @@ export class SyncService {
       );
       if (allVinaSims.length === 0) {
         this.logger.warn('No SIMs returned from Vinaphone quickSearch API');
-        this.updateSyncStatus(
-          'syncSims',
-          'completed',
-          'Không có SIM cần đồng bộ.',
-        );
+        await this.completeSync('syncSims', 'Không có SIM cần đồng bộ.');
         return;
       }
       this.updateSyncStatus(
@@ -487,7 +676,12 @@ export class SyncService {
         await this.prisma.$transaction(
           batch.map(({ phoneNumber, data, createExtra }) =>
             this.prisma.sim.upsert({
-              where: { phoneNumber },
+              where: {
+                accountId_phoneNumber: {
+                  accountId: getCurrentAccountId(),
+                  phoneNumber,
+                },
+              },
               update: data,
               create: {
                 phoneNumber,
@@ -536,7 +730,13 @@ export class SyncService {
         await this.prisma.$transaction(
           batchWithIds.map(({ simId, usedMB }) =>
             this.prisma.usageHistory.upsert({
-              where: { simId_month: { simId, month: currentMonth } },
+              where: {
+                accountId_simId_month: {
+                  accountId: getCurrentAccountId(),
+                  simId,
+                  month: currentMonth,
+                },
+              },
               update: { usedMB },
               create: { simId, month: currentMonth, usedMB },
             }),
@@ -599,16 +799,13 @@ export class SyncService {
       this.logger.log(
         `Sync completed: ${processed}/${allVinaSims.length} SIMs processed.`,
       );
-      this.updateSyncStatus(
+      await this.completeSync(
         'syncSims',
-        'completed',
         `Đồng bộ hoàn tất: ${processed}/${allVinaSims.length} SIM.`,
       );
     } catch (err) {
       this.logger.error('Sync failed', (err as Error).stack);
       this.updateSyncStatus('syncSims', 'failed', 'Đồng bộ SIM thất bại.', err);
-    } finally {
-      this.isSyncing = false;
     }
   }
 
@@ -619,12 +816,20 @@ export class SyncService {
    * This is meant to be triggered manually by the user (not via cron)
    * because the Vinaphone API has rate limits (~5000 calls/day).
    */
-  async syncMonthlyUsage(): Promise<{
+  async syncMonthlyUsage(accountId: string): Promise<{
+    success: number;
+    failed: number;
+    total: number;
+  } | undefined> {
+    return this.runInTenant(accountId, () => this.syncMonthlyUsageInTenant());
+  }
+
+  private async syncMonthlyUsageInTenant(): Promise<{
     success: number;
     failed: number;
     total: number;
   }> {
-    this.updateSyncStatus(
+    await this.updateSyncStatus(
       'syncMonthlyUsage',
       'running',
       'Đang chuẩn bị đồng bộ dung lượng tháng...',
@@ -742,7 +947,13 @@ export class SyncService {
         await this.prisma.$transaction(
           batch.map(([msisdn, { dataUsedMB, totalData }]) =>
             this.prisma.monthlyDataUsage.upsert({
-              where: { msisdn_month: { msisdn, month: currentMonth } },
+              where: {
+                accountId_msisdn_month: {
+                  accountId: getCurrentAccountId(),
+                  msisdn,
+                  month: currentMonth,
+                },
+              },
               update: { dataUsedMB, totalData },
               create: { msisdn, month: currentMonth, dataUsedMB, totalData },
             }),
@@ -758,9 +969,8 @@ export class SyncService {
         failed: normalMsisdns.length + masterMsisdns.length - allEntries.size,
         total: normalMsisdns.length + masterMsisdns.length,
       };
-      this.updateSyncStatus(
+      await this.completeSync(
         'syncMonthlyUsage',
-        'completed',
         `Đồng bộ hoàn tất: ${result.success}/${result.total} SIM; ${result.failed} lỗi.`,
       );
       return result;
@@ -777,8 +987,14 @@ export class SyncService {
 
   // ─── Sync rating plans ─────────────────────────────────────────────────────
 
-  async syncRatingPlans() {
-    this.updateSyncStatus(
+  async syncRatingPlans(
+    accountId: string,
+  ): Promise<boolean | undefined> {
+    return this.runInTenant(accountId, () => this.syncRatingPlansInTenant());
+  }
+
+  private async syncRatingPlansInTenant(): Promise<boolean> {
+    await this.updateSyncStatus(
       'syncRatingPlans',
       'running',
       'Đang tải danh sách gói cước...',
@@ -810,7 +1026,10 @@ export class SyncService {
       for (const [index, rp] of allRatingPlans.entries()) {
         await this.prisma.ratingPlan.upsert({
           where: {
-            ratingPlanId: rp.id,
+            accountId_ratingPlanId: {
+              accountId: getCurrentAccountId(),
+              ratingPlanId: rp.id,
+            },
           },
           update: { name: rp.name, code: rp.code, syncedAt: new Date() },
           create: {
@@ -833,11 +1052,11 @@ export class SyncService {
       this.logger.log(
         `Rating plan sync completed: ${allRatingPlans.length} plans processed.`,
       );
-      this.updateSyncStatus(
+      await this.completeSync(
         'syncRatingPlans',
-        'completed',
         `Đồng bộ hoàn tất: ${allRatingPlans.length} gói cước.`,
       );
+      return true;
     } catch (err) {
       this.logger.error('Rating plan sync failed', (err as Error).stack);
       this.updateSyncStatus(
@@ -846,13 +1065,18 @@ export class SyncService {
         'Đồng bộ gói cước thất bại.',
         err,
       );
+      return false;
     }
   }
 
   // --- Sync group sims ─────────────────────────────────────────────────────
 
-  async syncGroupSims() {
-    this.updateSyncStatus(
+  async syncGroupSims(accountId: string): Promise<void | undefined> {
+    return this.runInTenant(accountId, () => this.syncGroupSimsInTenant());
+  }
+
+  private async syncGroupSimsInTenant() {
+    await this.updateSyncStatus(
       'syncGroupSims',
       'running',
       'Đang tải danh sách nhóm thuê bao...',
@@ -884,7 +1108,10 @@ export class SyncService {
       for (const [index, gs] of allGroupSims.entries()) {
         await this.prisma.groupSim.upsert({
           where: {
-            groupId: gs.id,
+            accountId_groupId: {
+              accountId: getCurrentAccountId(),
+              groupId: gs.id,
+            },
           },
           update: { name: gs.name, groupKey: gs.groupKey },
           create: {
@@ -906,9 +1133,8 @@ export class SyncService {
       this.logger.log(
         `Group sim sync completed: ${allGroupSims.length} group sims processed.`,
       );
-      this.updateSyncStatus(
+      await this.completeSync(
         'syncGroupSims',
-        'completed',
         `Đồng bộ hoàn tất: ${allGroupSims.length} nhóm thuê bao.`,
       );
     } catch (err) {
@@ -1088,7 +1314,13 @@ export class SyncService {
       const now = new Date();
       for (const member of data.content) {
         await this.prisma.simGroupMember.upsert({
-          where: { groupId_msisdn: { groupId, msisdn: String(member.msisdn) } },
+          where: {
+            accountId_groupId_msisdn: {
+              accountId: getCurrentAccountId(),
+              groupId,
+              msisdn: String(member.msisdn),
+            },
+          },
           update: {
             ratingPlanName: member.ratingPlanName,
             status: member.status,

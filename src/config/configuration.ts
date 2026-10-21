@@ -6,7 +6,6 @@ export default () => ({
 
   jwt: {
     secret: process.env.JWT_SECRET || 'changeme',
-    expiresIn: process.env.JWT_EXPIRES_IN || '8h',
   },
 
   vinaphone: {
@@ -17,7 +16,6 @@ export default () => ({
       process.env.VINAPHONE_ONEIOT_BASE_URL ||
       'https://api-m2m.oneiot.com.vn/api',
     email: process.env.VINAPHONE_API_EMAIL || '',
-    password: process.env.VINAPHONE_API_PASSWORD || '',
     timeoutMs: parseInt(process.env.VINAPHONE_API_TIMEOUT_MS ?? '10000', 10),
     /** Timeout for large data fetches (quickSearch, memberOfGr) — default 2 minutes */
     dataTimeoutMs: parseInt(
@@ -25,6 +23,7 @@ export default () => ({
       10,
     ),
   },
+  tokenEncryptionKey: process.env.VINAPHONE_TOKEN_ENCRYPTION_KEY || '',
 
   syncCron: process.env.SYNC_CRON || '*/10 * * * *',
   /** Secret sent by Vercel Cron in the Authorization: Bearer header */

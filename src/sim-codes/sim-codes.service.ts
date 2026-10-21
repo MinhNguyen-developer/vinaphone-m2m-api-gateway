@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../generated/prisma';
+import { getCurrentAccountId } from '../prisma/tenant-context';
 import { CreateSimCodeDto } from './dto/create-sim-code.dto';
 import { UpdateSimCodeDto } from './dto/update-sim-code.dto';
 import { QuerySimCodeDto } from './dto/query-sim-code.dto';
@@ -109,7 +110,12 @@ export class SimCodesService {
 
   async create(dto: CreateSimCodeDto) {
     const existing = await this.prisma.simCode.findUnique({
-      where: { code: dto.code },
+      where: {
+        accountId_code: {
+          accountId: getCurrentAccountId(),
+          code: dto.code,
+        },
+      },
     });
     if (existing) {
       throw new ConflictException(`Mã SIM "${dto.code}" đã tồn tại`);

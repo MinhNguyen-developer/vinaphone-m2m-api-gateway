@@ -32,5 +32,5 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
-# Run migrations then start the app
+# Run migrations before starting the API.
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]

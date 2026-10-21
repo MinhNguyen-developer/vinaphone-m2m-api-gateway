@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { HttpModule } from '@nestjs/axios';
@@ -18,6 +19,7 @@ import { ContractsModule } from './contracts/contracts.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { SimCodesModule } from './sim-codes/sim-codes.module';
 import { BackupModule } from './backup/backup.module';
+import { TenantContextInterceptor } from './auth/tenant-context.interceptor';
 
 @Module({
   imports: [
@@ -42,6 +44,9 @@ import { BackupModule } from './backup/backup.module';
     DashboardModule,
     SimCodesModule,
     BackupModule,
+  ],
+  providers: [
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
   ],
 })
 export class AppModule {}

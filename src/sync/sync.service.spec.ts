@@ -5,6 +5,7 @@ import { SyncService } from './sync.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 describe('SyncService', () => {
+  const accountId = '0f6462cc-2e64-4f50-931b-4e379023ad14';
   let service: SyncService;
   let prisma: {
     sim: {
@@ -14,6 +15,11 @@ describe('SyncService', () => {
     usageHistory: {
       upsert: jest.Mock;
     };
+    syncJobState: {
+      findMany: jest.Mock;
+      upsert: jest.Mock;
+    };
+    ratingPlan: { count: jest.Mock };
     $transaction: jest.Mock;
   };
   let httpService: {
@@ -25,6 +31,10 @@ describe('SyncService', () => {
   let alertsService: {
     syncTriggeredAlertsBySimIds: jest.Mock;
   };
+  let authService: {
+    getValidVinaphoneToken: jest.Mock;
+    getEligibleAccountIds: jest.Mock;
+  };
 
   beforeEach(() => {
     prisma = {
@@ -35,6 +45,11 @@ describe('SyncService', () => {
       usageHistory: {
         upsert: jest.fn(),
       },
+      syncJobState: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn().mockResolvedValue({}),
+      },
+      ratingPlan: { count: jest.fn().mockResolvedValue(1) },
       $transaction: jest.fn(async (operations: Array<Promise<unknown>>) =>
         Promise.all(operations),
       ),
@@ -71,12 +86,17 @@ describe('SyncService', () => {
     alertsService = {
       syncTriggeredAlertsBySimIds: jest.fn().mockResolvedValue(1),
     };
+    authService = {
+      getValidVinaphoneToken: jest.fn().mockResolvedValue('token'),
+      getEligibleAccountIds: jest.fn().mockResolvedValue([accountId]),
+    };
 
     service = new SyncService(
       prisma as unknown as PrismaService,
       httpService as unknown as HttpService,
       configService as unknown as ConfigService,
       alertsService as any,
+      authService as any,
     );
 
     jest.spyOn(service as any, 'getToken').mockResolvedValue('token');
@@ -118,7 +138,7 @@ describe('SyncService', () => {
   });
 
   it('invokes alert trigger synchronization after SIM and usage upserts', async () => {
-    await service.syncSims();
+    await service.syncSims(accountId);
 
     expect(alertsService.syncTriggeredAlertsBySimIds).toHaveBeenCalledWith([
       'sim-1',
@@ -126,8 +146,8 @@ describe('SyncService', () => {
   });
 
   it('reuses the same synced SIM ids on repeated sync runs', async () => {
-    await service.syncSims();
-    await service.syncSims();
+    await service.syncSims(accountId);
+    await service.syncSims(accountId);
 
     expect(alertsService.syncTriggeredAlertsBySimIds).toHaveBeenCalledTimes(2);
     expect(alertsService.syncTriggeredAlertsBySimIds).toHaveBeenNthCalledWith(1, [
@@ -136,5 +156,64 @@ describe('SyncService', () => {
     expect(alertsService.syncTriggeredAlertsBySimIds).toHaveBeenNthCalledWith(2, [
       'sim-1',
     ]);
+  });
+
+  it('keeps progress and persisted last-sync state isolated by account', async () => {
+    const secondAccountId = '1f6462cc-2e64-4f50-931b-4e379023ad14';
+
+    await service.syncSims(accountId);
+
+    const accountStatus = await service.getSyncStatus(accountId);
+    const otherAccountStatus = await service.getSyncStatus(secondAccountId);
+
+    expect(accountStatus.syncSims.state).toBe('completed');
+    expect(accountStatus.syncSims.lastSyncedAt).toBeTruthy();
+    expect(otherAccountStatus.syncSims.state).toBe('idle');
+    expect(otherAccountStatus.syncSims.lastSyncedAt).toBeUndefined();
+    expect(prisma.syncJobState.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { accountId_job: { accountId, job: 'syncSims' } },
+        create: expect.objectContaining({ accountId }),
+      }),
+    );
+  });
+
+  it('syncs rating plans before a manual SIM sync when the account has none', async () => {
+    const operations: string[] = [];
+    prisma.ratingPlan.count.mockResolvedValue(0);
+    jest
+      .spyOn(service as any, 'syncRatingPlansInTenant')
+      .mockImplementation(async () => {
+        operations.push('rating-plans');
+        return true;
+      });
+    jest
+      .spyOn(service as any, 'syncSimsInTenant')
+      .mockImplementation(async () => {
+        operations.push('sims');
+      });
+
+    await service.syncSims(accountId);
+
+    expect(prisma.ratingPlan.count).toHaveBeenCalled();
+    expect(operations).toEqual(['rating-plans', 'sims']);
+  });
+
+  it('runs cron sync in dependency order', async () => {
+    const operations: string[] = [];
+    jest.spyOn(service, 'syncRatingPlans').mockImplementation(async () => {
+      operations.push('rating-plans');
+      return true;
+    });
+    jest.spyOn(service, 'syncSims').mockImplementation(async () => {
+      operations.push('sims');
+    });
+    jest.spyOn(service, 'syncGroupSims').mockImplementation(async () => {
+      operations.push('groups');
+    });
+
+    await service.syncEligibleAccounts();
+
+    expect(operations).toEqual(['rating-plans', 'sims', 'groups']);
   });
 });

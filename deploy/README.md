@@ -116,10 +116,11 @@ POSTGRES_PASSWORD=<strong-password>
 POSTGRES_DB=vinaphone_m2m
 
 JWT_SECRET=<long-random-string>
-JWT_EXPIRES_IN=8h
+
+VINAPHONE_TOKEN_ENCRYPTION_KEY=<32-byte-hex-key-from-openssl-rand-hex-32>
 
 VINAPHONE_API_BASE_URL=https://api.vinaphone.vn/m2m/v1
-VINAPHONE_API_KEY=<your-key>
+VINAPHONE_API_EMAIL=<account-a-email>
 VINAPHONE_API_TIMEOUT_MS=10000
 
 SYNC_CRON=*/10 * * * *
@@ -145,11 +146,16 @@ IMAGE_TAG=latest
 
 ## 4. Deploy
 
-Push to the `main` branch. GitHub Actions will:
+Push to the `main` branch. GitHub Actions builds and pushes the Docker image, then updates
+the Compose stack on EC2. The API container runs `prisma migrate deploy` before starting
+NestJS, so all pending migrations are applied automatically. The API may be briefly
+unavailable while Compose replaces the container and migrations run. If startup fails,
+inspect the API container logs before retrying; do not reset the database.
 
-1. Build the Docker image and push it to **GitHub Container Registry (ghcr.io)**
-2. SSH into EC2, pull the new image, write the `.env`, and run `docker compose up -d`
-3. The container CMD runs `prisma migrate deploy` then starts the NestJS app
+Keep `VINAPHONE_TOKEN_ENCRYPTION_KEY` unchanged across restarts and deployments. The
+migrations preserve existing rows and assign them to Account A. Before account B writes
+business data, rollback can redeploy the previous API; after B has written data, the old
+API cannot safely serve requests because it has no account filter.
 
 ---
 

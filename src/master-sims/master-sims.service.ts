@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { getCurrentAccountId } from '../prisma/tenant-context';
 import { PaginatedResult } from '../../src/types/common';
 import { Prisma, Sim } from '../../src/generated/prisma';
 import { QueryMasterSimDto } from './dto/query-master-sim.dto';
@@ -96,7 +97,7 @@ export class MasterSimsService {
 
   async findMembers(code: string, query: Record<string, unknown> = {}) {
     const masterSim = await this.prisma.masterSim.findUnique({
-      where: { code },
+      where: { accountId_code: { accountId: getCurrentAccountId(), code } },
     });
     if (!masterSim)
       throw new NotFoundException(`SIM chủ ${code} không tồn tại`);

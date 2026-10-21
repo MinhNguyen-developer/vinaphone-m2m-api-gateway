@@ -82,11 +82,14 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vinaphone_m2m
 
 # JWT
 JWT_SECRET=change_me_to_a_long_random_string
-JWT_EXPIRES_IN=8h
+
+# Encryption key for Vinaphone access tokens stored by the API (32 bytes as hex or base64)
+# Generate with: openssl rand -hex 32 (keep it stable across restarts)
+VINAPHONE_TOKEN_ENCRYPTION_KEY=
 
 # Vinaphone Upstream API
 VINAPHONE_API_BASE_URL=https://api.vinaphone.vn/m2m/v1
-VINAPHONE_API_KEY=your_api_key_here
+VINAPHONE_API_EMAIL=account-a@vinaphone.vn
 VINAPHONE_API_TIMEOUT_MS=10000
 
 # Sync Schedule (cron expression - mặc định 10 phút/lần)
@@ -216,16 +219,16 @@ Authorization: Bearer <token>
 
 ### `POST /auth/login`
 
-Đăng nhập, nhận JWT token.
+Đăng nhập bằng tài khoản Vinaphone. API xác thực với Vinaphone, lưu thông tin xác thực theo account và trả về JWT nội bộ.
 
 **Request body:**
 ```json
-{ "username": "admin", "password": "your_password" }
+{ "email": "user@vinaphone.vn", "password": "your_password" }
 ```
 
 **Response:**
 ```json
-{ "access_token": "eyJhbGci...", "expires_in": "8h" }
+{ "access_token": "eyJhbGci...", "expires_in": 3600, "expires_at": "2026-10-21T02:00:00.000Z" }
 ```
 
 ---
@@ -358,7 +361,8 @@ if (sim.status === 'Mới' && newUsedMB > 0) {
 ## Authentication
 
 - **JWT (HS256)** với `@nestjs/jwt` + `passport-jwt`
-- Token hết hạn sau `JWT_EXPIRES_IN` (mặc định `8h`)
+- JWT nội bộ có `sub` là UUID account và hết hạn đúng cùng thời điểm với token Vinaphone.
+- Token Vinaphone được mã hóa AES-GCM trong database; dashboard chỉ nhận JWT nội bộ.
 - `JwtAuthGuard` áp dụng global, trừ các route được đánh dấu `@Public()`
 
 ---
@@ -389,7 +393,18 @@ docker compose up postgres redis
 ```
 
 `docker-compose.yml` bao gồm PostgreSQL 15, Redis 7, và service API với healthcheck.  
-Migration (`prisma migrate deploy`) chạy tự động khi container API khởi động.
+Khi workflow deploy thay API container, `CMD` trong Dockerfile chạy `prisma migrate deploy`
+trước khi khởi động API. API có thể tạm gián đoạn trong lúc container mới chạy migration.
+Nếu migration lỗi, xem log container API; không reset database.
+Đăng nhập account B sau khi workflow deploy hoàn tất.
+
+Trước khi account B ghi dữ liệu, có thể rollback về API cũ vì các migration không xóa
+dữ liệu. Sau khi B đã ghi dữ liệu, không dùng lại API cũ vì phiên bản đó không lọc theo
+tài khoản.
+
+Đặt `VINAPHONE_TOKEN_ENCRYPTION_KEY` ổn định trong secret của EC2 trước lần đăng nhập
+đầu tiên. Migration gán dữ liệu hiện có cho account A; đăng nhập thành công bằng email
+trong `VINAPHONE_API_EMAIL` sẽ gắn email đó vào UUID đã dành sẵn.
 
 ---
 
@@ -402,8 +417,8 @@ Migration (`prisma migrate deploy`) chạy tự động khi container API khởi
 | 3 | **Encoding:** PostgreSQL dùng `ENCODING = 'UTF8'`. Response `Content-Type: application/json; charset=utf-8`. |
 | 4 | **Pagination:** Luôn phân trang. Tối đa `pageSize = 200`. |
 | 5 | **usedMB đơn vị:** Thống nhất **MB** (`Int`). 1 GB = 1024 MB. |
-| 6 | **Sync cron:** `SyncService` dùng `SchedulerRegistry` + `CronJob`, đọc `SYNC_CRON` từ env lúc runtime. |
+| 6 | **Sync cron:** Migration này không bật scheduler tự động. Endpoint cron có `CRON_SECRET` chạy tuần tự các job cho account còn token hợp lệ. |
 | 7 | **master_sims.usedMB:** Tính lại mỗi lần sync = `SUM(sims.usedMB WHERE masterSimCode = code)` qua `prisma.sim.aggregate`. |
 | 8 | **Rate limiting:** `@nestjs/throttler` (100 req / 60s mặc định). |
 | 9 | **Prisma client:** Auto-generated vào `src/generated/prisma/` (git-ignored). Chạy lại bằng `npx prisma generate` hoặc tự động qua `postinstall`. |
-| 10 | **Auth production:** `STATIC_USERS` trong `auth.service.ts` chỉ dùng cho dev. Thay bằng DB table + bcrypt trước khi deploy. |
+| 10 | **Auth:** Vinaphone xác thực email/password; mật khẩu được hash bằng scrypt và token upstream được mã hóa AES-GCM trong DB. JWT nội bộ mang UUID account và hết hạn theo token upstream. |

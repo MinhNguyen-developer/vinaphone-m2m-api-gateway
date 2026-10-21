@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma';
 import { PrismaService } from '../prisma/prisma.service';
+import { getCurrentAccountId } from '../prisma/tenant-context';
 import { QueryRatingPlanDto } from './dto/query-rating-plan.dto';
 
 @Injectable()
@@ -30,7 +31,12 @@ export class RatingPlanService {
 
   async findByRatingPlanId(ratingPlanId: number) {
     return this.prisma.ratingPlan.findUnique({
-      where: { ratingPlanId },
+      where: {
+        accountId_ratingPlanId: {
+          accountId: getCurrentAccountId(),
+          ratingPlanId,
+        },
+      },
     });
   }
 }
