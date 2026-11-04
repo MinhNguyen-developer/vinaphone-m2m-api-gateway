@@ -25,7 +25,7 @@ import {
 import { UpdateFirstUsedAtDto } from './dto/update-first-used-at.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
 import { QueryGroupMembersDto } from './dto/query-group-members.dto';
-import mapSortStringToOrderInput from 'src/utils/mapSortStringToOrderInput';
+import mapSortStringToOrderInput from '../utils/mapSortStringToOrderInput';
 
 @Injectable()
 export class SimsService {
@@ -124,6 +124,9 @@ export class SimsService {
         : orderBy.length
           ? orderBy
           : [{ phoneNumber: 'asc' }];
+
+    // Keep page boundaries stable when multiple SIMs share the sort values.
+    effectiveOrderBy.push({ id: 'asc' });
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.sim.findMany({
