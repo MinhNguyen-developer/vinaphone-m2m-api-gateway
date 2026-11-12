@@ -93,7 +93,7 @@ export interface QuickSearchSimItem {
   connectionStatus: string | null;
   startDate: string | null;
   serviceType: number | null;
-  simType: number;
+  simType?: number | null;
   sog: string | null;
 }
 
