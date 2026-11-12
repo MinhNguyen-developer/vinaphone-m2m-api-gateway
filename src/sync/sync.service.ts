@@ -608,7 +608,8 @@ export class SyncService {
           customerName,
           customerCode,
           contractInfo,
-          simType,
+          // Preserve the stored type when absent; new SIMs use the schema default.
+          ...(simType == null ? {} : { simType }),
           provinceCode,
           ratingPlanId,
           ratingPlanName,

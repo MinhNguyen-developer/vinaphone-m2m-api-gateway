@@ -158,6 +158,61 @@ describe('SyncService', () => {
     ]);
   });
 
+  describe.each([false, true])('when the SIM already exists: %s', (exists) => {
+    it.each([null, undefined, 0, 1])(
+      'syncs a cancelled SIM with upstream simType=%s',
+      async (simType) => {
+        jest
+          .spyOn(service as any, 'fetchAllSimsQuickSearch')
+          .mockResolvedValue([
+            {
+              msisdn: '0912345678',
+              status: 5,
+              ratingPlanId: 10,
+              ratingPlanName: 'Plan A',
+              sog: '[]',
+              ...(simType === undefined ? {} : { simType }),
+            },
+          ]);
+        prisma.sim.findMany.mockResolvedValueOnce(
+          exists
+            ? [
+                {
+                  id: 'sim-1',
+                  phoneNumber: '0912345678',
+                  status: 1,
+                  simType: 1,
+                  imsi: null,
+                  contractCode: null,
+                },
+              ]
+            : [],
+        );
+
+        await service.syncSims(accountId);
+
+        expect(prisma.sim.upsert).toHaveBeenCalledTimes(1);
+        const { create, update } = prisma.sim.upsert.mock.calls[0][0];
+        for (const data of [create, update]) {
+          if (simType == null) {
+            // Omission preserves the existing type; creates use the schema default.
+            expect(data).not.toHaveProperty('simType');
+          } else {
+            expect(data.simType).toBe(simType);
+          }
+          expect(data.vinaphoneStatus).toBe(5);
+          expect(data.systemStatus).toBe('Đã hủy');
+        }
+        expect(alertsService.syncTriggeredAlertsBySimIds).toHaveBeenCalledWith([
+          'sim-1',
+        ]);
+        expect((await service.getSyncStatus(accountId)).syncSims.state).toBe(
+          'completed',
+        );
+      },
+    );
+  });
+
   it('keeps progress and persisted last-sync state isolated by account', async () => {
     const secondAccountId = '1f6462cc-2e64-4f50-931b-4e379023ad14';
 
