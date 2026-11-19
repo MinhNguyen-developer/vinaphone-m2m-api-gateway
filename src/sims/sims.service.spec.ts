@@ -51,3 +51,67 @@ describe('SimsService pagination', () => {
     },
   );
 });
+
+describe('SimsService picker and code filters', () => {
+  const prisma = {
+    sim: { findMany: jest.fn(), count: jest.fn() },
+    alertConfig: { findMany: jest.fn() },
+    $transaction: jest.fn(),
+  };
+  const service = new SimsService(prisma as unknown as PrismaService);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.$transaction.mockResolvedValue([[], 501]);
+    prisma.sim.findMany.mockResolvedValue([]);
+    prisma.alertConfig.findMany.mockResolvedValue([]);
+  });
+
+  it('bounds picker responses with stable page boundaries and a total', async () => {
+    await expect(
+      service.getAllSims({ page: 2, pageSize: 500 }),
+    ).resolves.toEqual({
+      data: [],
+      total: 501,
+      page: 2,
+      pageSize: 500,
+    });
+    expect(prisma.sim.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 500,
+        take: 500,
+        orderBy: [{ phoneNumber: 'asc' }, { id: 'asc' }],
+      }),
+    );
+  });
+
+  it('preserves the unpaginated array contract when pagination is omitted', async () => {
+    await expect(service.getAllSims()).resolves.toEqual([]);
+    const calls = prisma.sim.findMany.mock.calls as [Record<string, unknown>][];
+    const args = calls[0][0];
+    expect(args).not.toHaveProperty('take');
+    expect(args).not.toHaveProperty('skip');
+  });
+
+  it('matches any selected SIM code while retaining other filters for rows and count', async () => {
+    await service.findAll({
+      simCode: ['code-1', 'code-2'],
+      status: 2,
+      groupId: ['group-1'],
+    });
+    const where = {
+      simCode: { id: { in: ['code-1', 'code-2'] } },
+      status: 2,
+      simGroups: { some: { groupId: { in: ['group-1'] } } },
+    };
+    expect(prisma.sim.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where }),
+    );
+    expect(prisma.sim.count).toHaveBeenCalledWith({ where });
+  });
+
+  it('clearing all code selections removes the code constraint', async () => {
+    await service.findAll({ simCode: [] });
+    expect(prisma.sim.count).toHaveBeenCalledWith({ where: {} });
+  });
+});

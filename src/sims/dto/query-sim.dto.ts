@@ -173,11 +173,17 @@ export class QuerySimDto {
   @IsString()
   activeDateTo?: string;
 
-  @ApiPropertyOptional({ description: 'Tìm theo mã SIM' })
+  @ApiPropertyOptional({
+    description: 'Lọc theo ID mã SIM. Có thể truyền nhiều giá trị.',
+    type: [String],
+  })
   @IsOptional()
-  @Type(() => String)
-  @IsString()
-  simCode?: string;
+  @Transform(({ value }: { value: unknown }) =>
+    Array.isArray(value) ? (value as unknown[]) : [value],
+  )
+  @IsArray()
+  @IsString({ each: true })
+  simCode?: string[];
 
   @ApiPropertyOptional({
     description: 'Tìm sim thành viên hoặc chủ nhóm gói cước (SOG)',
