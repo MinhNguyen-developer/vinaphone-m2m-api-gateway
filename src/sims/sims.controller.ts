@@ -16,6 +16,7 @@ import {
 } from '@nestjs/swagger';
 import { SimsService } from './sims.service';
 import { QuerySimDto } from './dto/query-sim.dto';
+import { QueryAllSimsDto } from './dto/query-all-sims.dto';
 import {
   BatchUpdateSimStatusDto,
   UpdateSimStatusDto,
@@ -46,10 +47,10 @@ export class SimsController {
   @Get('all')
   @ApiOperation({
     summary:
-      'Lấy tất cả SIM (không phân trang, chỉ trả về id/phoneNumber/ratingPlanName/productCode)',
+      'Lấy tất cả SIM; truyền page/pageSize để tải theo từng trang có total',
   })
-  getAllSims() {
-    return this.simsService.getAllSims();
+  getAllSims(@Query() query: QueryAllSimsDto) {
+    return this.simsService.getAllSims(query);
   }
 
   @Get('group/rating-plans')

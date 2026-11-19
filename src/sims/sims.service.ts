@@ -10,6 +10,7 @@ import { MonthlyDataUsage, Prisma, Sim } from '../generated/prisma/index.js';
 import { SimStatus } from '../types/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuerySimDto } from './dto/query-sim.dto';
+import { QueryAllSimsDto } from './dto/query-all-sims.dto';
 import { parseSortParam } from './dto/query-sim.dto';
 import {
   UpdateSimStatusDto,
@@ -89,7 +90,7 @@ export class SimsService {
             lte: dayjs(activeDateTo, 'YYYY-MM-DD').endOf('day').toDate(),
           },
         }),
-      ...(simCode && { simCode: { id: { equals: simCode } } }),
+      ...(simCode?.length && { simCode: { id: { in: simCode } } }),
     };
 
     const orderBy: Prisma.SimOrderByWithRelationInput[] =
@@ -215,8 +216,8 @@ export class SimsService {
     };
   }
 
-  async getAllSims() {
-    const sims = await this.prisma.sim.findMany({
+  async getAllSims(query: QueryAllSimsDto = {}) {
+    const args = {
       select: {
         id: true,
         phoneNumber: true,
@@ -244,9 +245,23 @@ export class SimsService {
           },
         },
       },
-      orderBy: { phoneNumber: 'asc' },
-    });
-    return sims;
+      orderBy: [{ phoneNumber: 'asc' }, { id: 'asc' }],
+    } satisfies Prisma.SimFindManyArgs;
+
+    // Preserve the array contract for clients that do not request pagination.
+    if (query.page === undefined && query.pageSize === undefined) {
+      return this.prisma.sim.findMany(args);
+    }
+    const { page = 1, pageSize = 500 } = query;
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.sim.findMany({
+        ...args,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.sim.count(),
+    ]);
+    return { data, total, page, pageSize };
   }
 
   async findOne(id: string): Promise<Sim> {
