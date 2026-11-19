@@ -250,7 +250,18 @@ export class SimsService {
 
     // Preserve the array contract for clients that do not request pagination.
     if (query.page === undefined && query.pageSize === undefined) {
-      return this.prisma.sim.findMany(args);
+      // Bound nested relation reads even for older clients to avoid P2029.
+      const pageSize = 500;
+      const data: Prisma.SimGetPayload<{ select: typeof args.select }>[] = [];
+      for (let skip = 0; ; skip += pageSize) {
+        const batch = await this.prisma.sim.findMany({
+          ...args,
+          skip,
+          take: pageSize,
+        });
+        data.push(...batch);
+        if (batch.length < pageSize) return data;
+      }
     }
     const { page = 1, pageSize = 500 } = query;
     const [data, total] = await this.prisma.$transaction([

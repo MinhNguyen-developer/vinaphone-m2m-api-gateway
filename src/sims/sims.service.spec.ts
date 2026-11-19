@@ -1,5 +1,6 @@
 import { SimsService } from './sims.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma';
 
 describe('SimsService pagination', () => {
   const prisma = {
@@ -85,12 +86,43 @@ describe('SimsService picker and code filters', () => {
     );
   });
 
-  it('preserves the unpaginated array contract when pagination is omitted', async () => {
+  it('preserves the array response when pagination is omitted', async () => {
     await expect(service.getAllSims()).resolves.toEqual([]);
-    const calls = prisma.sim.findMany.mock.calls as [Record<string, unknown>][];
-    const args = calls[0][0];
-    expect(args).not.toHaveProperty('take');
-    expect(args).not.toHaveProperty('skip');
+  });
+
+  it('loads all legacy picker SIMs in bounded queries without losing group data', async () => {
+    const sims = Array.from({ length: 40_000 }, (_, i) => ({
+      id: `sim-${i}`,
+      phoneNumber: String(84900000000 + i),
+      internalImsi: String(1000000000 + i),
+      simGroups: [{ group: { id: 'group-1', name: 'Test group' } }],
+    }));
+    // Prisma 7.7 reproduces P2029 when an unbounded nested read loads 40k SIMs.
+    prisma.sim.findMany.mockImplementation(
+      ({ skip = 0, take }: Prisma.SimFindManyArgs) => {
+        if (take === undefined || take > 1000) {
+          throw new Error('P2029: unbounded SIM relation query');
+        }
+        return Promise.resolve(sims.slice(skip, skip + take));
+      },
+    );
+
+    const result = await service.getAllSims();
+
+    if (!Array.isArray(result)) throw new Error('Expected legacy array response');
+    expect(result).toHaveLength(40_000);
+    expect(result[0]).toEqual({
+      id: 'sim-0',
+      phoneNumber: '84900000000',
+      internalImsi: '1000000000',
+      simGroups: [{ group: { id: 'group-1', name: 'Test group' } }],
+    });
+    expect(result[39_999]).toMatchObject({
+      id: 'sim-39999',
+      internalImsi: '1000039999',
+      simGroups: [{ group: { id: 'group-1', name: 'Test group' } }],
+    });
+    expect(new Set(result.map((sim) => sim.id)).size).toBe(40_000);
   });
 
   it('matches any selected SIM code while retaining other filters for rows and count', async () => {
